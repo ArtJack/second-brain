@@ -20,6 +20,7 @@ class AgentState(TypedDict, total=False):
     argument: str
     answer: str
     sources: list[dict]
+    invalid_citations: list[int]
     exit: bool
 
 
@@ -57,7 +58,12 @@ def route(state: AgentState) -> AgentState:
 
 def ask_node(state: AgentState) -> AgentState:
     res = ask_memory(state["argument"])
-    return {**state, "answer": res["answer"], "sources": res["sources"]}
+    return {
+        **state,
+        "answer": res["answer"],
+        "sources": res["sources"],
+        "invalid_citations": res.get("invalid_citations", []),
+    }
 
 
 def learn_node(state: AgentState) -> AgentState:

@@ -28,6 +28,10 @@ def _print_answer(res: dict, show_distance: bool = True) -> None:
             console.print(f"  [cyan][{s['n']}][/] {s['source']} [dim](dist {s['distance']:.3f})[/]")
         else:
             console.print(f"  [cyan][{s['n']}][/] {s['source']}", style="dim")
+    invalid = res.get("invalid_citations") or []
+    if invalid:
+        refs = ", ".join(f"[{n}]" for n in invalid)
+        console.print(f"  [yellow]⚠ ungrounded citation(s) {refs}: no matching source — answer may be unreliable[/]")
 
 
 def _ingest_path(path: str, reset: bool = False) -> dict:

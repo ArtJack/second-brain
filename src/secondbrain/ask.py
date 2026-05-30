@@ -1,6 +1,7 @@
 """Retrieve relevant chunks and produce a grounded, cited answer."""
 from __future__ import annotations
 
+from .citations import invalid_citations
 from .config import cfg
 from .llm import answer, embed
 from .store import Store
@@ -9,7 +10,11 @@ from .store import Store
 def ask(question: str, k: int | None = None) -> dict:
     store = Store()
     if store.count() == 0:
-        return {"answer": "Nothing ingested yet — run `sb ingest <path>` first.", "sources": []}
+        return {
+            "answer": "Nothing ingested yet — run `sb ingest <path>` first.",
+            "sources": [],
+            "invalid_citations": [],
+        }
 
     qvec = embed([question])[0]
     hits = store.query(qvec, k or cfg.top_k)
@@ -21,4 +26,8 @@ def ask(question: str, k: int | None = None) -> dict:
         sources.append({"n": i, "source": meta.get("source", "?"), "distance": h["distance"]})
 
     answer_text = answer(question, "\n\n".join(context_parts))
-    return {"answer": answer_text, "sources": sources}
+    return {
+        "answer": answer_text,
+        "sources": sources,
+        "invalid_citations": invalid_citations(answer_text, len(sources)),
+    }
