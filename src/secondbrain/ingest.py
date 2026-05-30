@@ -72,9 +72,14 @@ def ingest_paths(path: str | Path, reset: bool = False) -> Iterator[tuple[Path, 
     for f in discover(path):
         text = read_file(f)
         chunks = chunk_text(text, cfg.chunk_size, cfg.chunk_overlap)
+        src = str(f)
+        # Replace any earlier ingest of this file. Without this, editing a file so it
+        # produces *fewer* chunks would leave the old higher-index chunks behind as
+        # orphans. (Skipped on reset=True, which already wiped the whole collection.)
+        if not reset:
+            store.delete_source(src)
         if not chunks:
             continue
-        src = str(f)
         ids = [f"{src}#{i}" for i in range(len(chunks))]
         metadatas = [{"source": src, "name": f.name, "chunk": i} for i in range(len(chunks))]
         store.upsert(ids=ids, embeddings=embed(chunks), documents=chunks, metadatas=metadatas)

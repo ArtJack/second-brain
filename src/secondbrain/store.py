@@ -28,6 +28,10 @@ class ChromaStore:
     def upsert(self, ids, embeddings, documents, metadatas) -> None:
         self._col.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
+    def delete_source(self, source: str) -> None:
+        """Drop every chunk previously ingested from `source` (matched on metadata)."""
+        self._col.delete(where={"source": source})
+
     def query(self, embedding: list[float], k: int):
         res = self._col.query(
             query_embeddings=[embedding],
@@ -114,6 +118,24 @@ class QdrantStore:
                 )
             )
         self._client.upsert(collection_name=self._collection, points=points)
+
+    def delete_source(self, source: str) -> None:
+        """Drop every point previously ingested from `source` (matched on payload)."""
+        if not self._exists():
+            return
+        self._client.delete(
+            collection_name=self._collection,
+            points_selector=self._models.FilterSelector(
+                filter=self._models.Filter(
+                    must=[
+                        self._models.FieldCondition(
+                            key="source",
+                            match=self._models.MatchValue(value=source),
+                        )
+                    ]
+                )
+            ),
+        )
 
     def query(self, embedding: list[float], k: int):
         if not self._exists():
