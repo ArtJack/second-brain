@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Template. Render + install with deploy/install-mcp-service.sh (placeholders are substituted). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.secondbrain.mcp</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__UV__</string>
+    <string>run</string>
+    <string>--directory</string>
+    <string>__REPO__</string>
+    <string>sb-mcp</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SB_MCP_TRANSPORT</key><string>http</string>
+    <key>SB_MCP_HOST</key><string>__HOST__</string>
+    <key>SB_MCP_PORT</key><string>__PORT__</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/secondbrain-mcp.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/secondbrain-mcp.log</string>
+</dict>
+</plist>

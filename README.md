@@ -58,9 +58,27 @@ question ──▶ LangGraph ──ask──▶ Store.query ──top-k──▶
 - [x] Explicit learned memory (`sb learn`, `/learn` in agent mode)
 - [x] LangGraph turn workflow + SQLite task store
 - [ ] **Hybrid search** (vector + BM25 keyword) + reranking
-- [ ] Wrap as an **MCP server** so Claude Desktop / Claude Code can query your brain directly
+- [x] Wrap as an **MCP server** so Claude Desktop / Claude Code can query your brain directly ([docs](docs/MCP.md))
 - [ ] **Eval harness**: a golden Q→expected-source set, measure retrieval hit-rate
 - [ ] Web UI (Next.js) + deploy → the public-URL portfolio piece
+
+## MCP server
+
+Expose the brain to any MCP client (Claude Code, Claude Desktop, a native iPad/MacBook
+client) so an agent can query and teach it directly. It reuses this engine, so it inherits
+the free-local-model gateway defaults — **no extra cost**. Full guide: **[docs/MCP.md](docs/MCP.md)**.
+
+```bash
+uv run sb-mcp                       # stdio (local clients launch it as a subprocess)
+SB_MCP_TRANSPORT=http \
+SB_MCP_HOST=0.0.0.0 SB_MCP_PORT=8848 \
+SB_MCP_TOKEN=$(openssl rand -hex 24) uv run sb-mcp   # Streamable HTTP, token-protected
+```
+
+Tools: `ask` (cited answer), `recall` (raw chunks, no model call), `ingest`, `learn`,
+`list_tasks`, `add_task`, `complete_task`, `status`. Claude Code auto-loads the stdio
+server from the repo's `.mcp.json` — just run `claude` here (works over SSH from the iPad).
+Inspect interactively with `npx @modelcontextprotocol/inspector`.
 
 ## Config
 

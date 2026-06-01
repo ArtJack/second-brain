@@ -12,11 +12,14 @@ dependencies = [
     "qdrant-client>=1.18.0",
     "typer>=0.12",
     "rich>=13.7",
+    "mcp[cli]>=1.27.2",
+    "uvicorn>=0.48.0",
 ]
 
 [project.scripts]
 sb = "secondbrain.cli:app"
 artjeck = "secondbrain.cli:artjeck_main"
+sb-mcp = "secondbrain.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
