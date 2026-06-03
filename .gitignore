@@ -1,0 +1,16 @@
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Secrets / local config
+.env
+.env.gateway
+
+# Local vector store + ingested data
+data/
+*.sqlite3
+
+# OS
+.DS_Store
