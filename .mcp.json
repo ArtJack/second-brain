@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "second-brain": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/Users/artjack/Projects/AI/projects/second-brain",
+        "sb-mcp"
+      ]
+    }
+  }
+}

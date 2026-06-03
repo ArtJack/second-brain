@@ -1,0 +1,201 @@
+{
+  "name": "second-brain-regression",
+  "description": "Synthetic multi-document regression corpus for retrieval, grounded answers, and abstention behavior.",
+  "corpus": ["corpus"],
+  "corpus_collection": "second_brain_regression",
+  "cases": [
+    {
+      "id": "lab-code-route",
+      "query": "Where does the code alias run?",
+      "expected_sources": ["evals/corpus/ai-lab-routing.md"],
+      "expected_answer_contains": ["M4 Mac mini"],
+      "tags": ["routing", "rubric-smoke"]
+    },
+    {
+      "id": "lab-chat-route",
+      "query": "Which machine handles the local chat alias?",
+      "expected_sources": ["evals/corpus/ai-lab-routing.md"],
+      "expected_answer_contains": ["Alienware", "GTX 1070"],
+      "tags": ["routing"]
+    },
+    {
+      "id": "lab-gateway-url",
+      "query": "What URL should model requests use for the LiteLLM gateway?",
+      "expected_sources": ["evals/corpus/ai-lab-routing.md"],
+      "expected_answer_contains": ["http://127.0.0.1:4000"],
+      "tags": ["routing"]
+    },
+    {
+      "id": "lab-paid-cap",
+      "query": "What spending cap applies to the Claude fallback?",
+      "expected_sources": ["evals/corpus/ai-lab-routing.md"],
+      "expected_answer_contains": ["$50", "30-day"],
+      "tags": ["routing"]
+    },
+    {
+      "id": "brain-memory-format",
+      "query": "How are durable learned facts stored?",
+      "expected_sources": ["evals/corpus/second-brain-operations.md"],
+      "expected_answer_contains": ["Markdown"],
+      "tags": ["memory"]
+    },
+    {
+      "id": "brain-auto-learning",
+      "query": "Should the assistant silently remember its own guesses?",
+      "expected_sources": ["evals/corpus/second-brain-operations.md"],
+      "expected_answer_contains_any": ["must not", "should not", "no"],
+      "tags": ["memory", "rubric-smoke"]
+    },
+    {
+      "id": "brain-vector-store",
+      "query": "Where do the heavy embedding vectors live?",
+      "expected_sources": ["evals/corpus/second-brain-operations.md"],
+      "expected_answer_contains": ["Qdrant", "Alienware"],
+      "tags": ["memory"]
+    },
+    {
+      "id": "mcp-http-endpoint",
+      "query": "What URL should a remote native MCP client use?",
+      "expected_sources": ["evals/corpus/deployment-access.md"],
+      "expected_answer_contains": ["http://YOUR_TAILSCALE_IP:8848/mcp"],
+      "tags": ["deployment", "rubric-smoke"]
+    },
+    {
+      "id": "mcp-local-transport",
+      "query": "Which transport do local MCP clients use to launch sb-mcp?",
+      "expected_sources": ["evals/corpus/deployment-access.md"],
+      "expected_answer_contains": ["stdio"],
+      "tags": ["deployment"]
+    },
+    {
+      "id": "mcp-auth-header",
+      "query": "Which authorization header is required by HTTP MCP clients?",
+      "expected_sources": ["evals/corpus/deployment-access.md"],
+      "expected_answer_contains": ["Authorization", "Bearer"],
+      "tags": ["deployment"]
+    },
+    {
+      "id": "product-vertical",
+      "query": "Which vertical was selected for the public portfolio product?",
+      "expected_sources": ["evals/corpus/logistics-product.md"],
+      "expected_answer_contains": ["trucking", "logistics"],
+      "tags": ["product"]
+    },
+    {
+      "id": "product-first-mvp",
+      "query": "What capabilities belong in the first logistics MVP?",
+      "expected_sources": ["evals/corpus/logistics-product.md"],
+      "expected_answer_contains": ["Bill-of-Lading", "IFTA"],
+      "tags": ["product"]
+    },
+    {
+      "id": "career-target-role",
+      "query": "What role is the career plan targeting?",
+      "expected_sources": ["evals/corpus/career-plan.md"],
+      "expected_answer_contains": ["AI Agent Engineer"],
+      "tags": ["career"]
+    },
+    {
+      "id": "career-portfolio-gap",
+      "query": "What is the biggest current portfolio gap?",
+      "expected_sources": ["evals/corpus/career-plan.md"],
+      "expected_answer_contains": ["deployed product", "public URL"],
+      "tags": ["career"]
+    },
+    {
+      "id": "documents-case-timeline",
+      "query": "What should happen after PDFs arrive in a case-document workflow?",
+      "expected_sources": ["evals/corpus/document-workflows.md"],
+      "expected_answer_contains": ["timeline", "citations"],
+      "tags": ["documents"]
+    },
+    {
+      "id": "admin-invoice-format",
+      "query": "What invoice format is preferred?",
+      "expected_sources": ["evals/corpus/admin-preferences.md"],
+      "expected_answer_contains": ["PDF", "line items"],
+      "tags": ["preferences"]
+    },
+    {
+      "id": "admin-update-style",
+      "query": "How should engineering updates be written?",
+      "expected_sources": ["evals/corpus/admin-preferences.md"],
+      "expected_answer_contains": ["short", "exact file paths"],
+      "tags": ["preferences"]
+    },
+    {
+      "id": "backup-schedule",
+      "query": "How often should Qdrant snapshots and restore drills run?",
+      "expected_sources": ["evals/corpus/backup-policy.md"],
+      "expected_answer_contains": ["weekly", "once per month"],
+      "tags": ["backup"]
+    },
+    {
+      "id": "multi-model-and-mcp-urls",
+      "query": "Give me both the LiteLLM gateway URL and the remote native MCP URL.",
+      "expected_sources": [
+        "evals/corpus/ai-lab-routing.md",
+        "evals/corpus/deployment-access.md"
+      ],
+      "expected_answer_contains": [
+        "http://127.0.0.1:4000",
+        "http://YOUR_TAILSCALE_IP:8848/mcp"
+      ],
+      "tags": ["multi-source", "rubric-smoke"]
+    },
+    {
+      "id": "multi-storage-backup",
+      "query": "Which second-brain assets need backups, and what is the schedule?",
+      "expected_sources": [
+        "evals/corpus/second-brain-operations.md",
+        "evals/corpus/backup-policy.md"
+      ],
+      "expected_answer_contains": ["Markdown", "SQLite", "Qdrant", "nightly", "weekly"],
+      "tags": ["multi-source"]
+    },
+    {
+      "id": "multi-portfolio-product",
+      "query": "What should be shipped to close the portfolio gap, and which vertical should it serve?",
+      "expected_sources": [
+        "evals/corpus/career-plan.md",
+        "evals/corpus/logistics-product.md"
+      ],
+      "expected_answer_contains": ["public", "trucking", "logistics"],
+      "tags": ["multi-source"]
+    },
+    {
+      "id": "multi-logistics-document-flow",
+      "query": "For the trucking MVP, what document extraction workflow and Bill-of-Lading details are needed?",
+      "expected_sources": [
+        "evals/corpus/logistics-product.md",
+        "evals/corpus/document-workflows.md"
+      ],
+      "expected_answer_contains": ["Bill", "shipper", "consignee"],
+      "tags": ["multi-source"]
+    },
+    {
+      "id": "abstain-birthday",
+      "query": "What is the user's birthday?",
+      "expect_abstain": true,
+      "tags": ["abstention", "rubric-smoke"]
+    },
+    {
+      "id": "abstain-coffee",
+      "query": "What is the user's favorite coffee order?",
+      "expect_abstain": true,
+      "tags": ["abstention"]
+    },
+    {
+      "id": "abstain-calendar",
+      "query": "What meeting is on the calendar tomorrow at 10 AM?",
+      "expect_abstain": true,
+      "tags": ["abstention"]
+    },
+    {
+      "id": "abstain-revenue",
+      "query": "How much revenue did the logistics product earn last month?",
+      "expect_abstain": true,
+      "tags": ["abstention"]
+    }
+  ]
+}

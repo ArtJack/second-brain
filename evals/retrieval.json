@@ -1,0 +1,34 @@
+{
+  "name": "lab-notes-smoke",
+  "description": "Starter benchmark for the demo note. Replace and extend this with real personal-corpus cases.",
+  "cases": [
+    {
+      "id": "model-routing-code",
+      "query": "Where is the code model routed?",
+      "expected_sources": ["examples/lab-notes.md"],
+      "expected_answer_contains": ["M4 Mac mini"],
+      "tags": ["routing"]
+    },
+    {
+      "id": "gateway-url",
+      "query": "What URL does the LiteLLM gateway use?",
+      "expected_sources": ["examples/lab-notes.md"],
+      "expected_answer_contains": ["http://127.0.0.1:4000"],
+      "tags": ["gateway"]
+    },
+    {
+      "id": "claude-budget",
+      "query": "What budget cap applies to the paid Claude route?",
+      "expected_sources": ["examples/lab-notes.md"],
+      "expected_answer_contains": ["$50", "30-day"],
+      "tags": ["gateway", "budget"]
+    },
+    {
+      "id": "career-vertical",
+      "query": "Which vertical was chosen for the portfolio product?",
+      "expected_sources": ["examples/lab-notes.md"],
+      "expected_answer_contains": ["trucking", "logistics"],
+      "tags": ["career"]
+    }
+  ]
+}
