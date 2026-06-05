@@ -13,6 +13,8 @@ sb ask "what did I decide about the gateway routing?"
 sb learn "My preferred invoice format is PDF with line items."
 sb agent                    # ask questions, teach it with /learn <fact>
 sb chat                      # interactive
+sb overnight                 # safe nightly scan: ingest changed files + write a morning report
+sb morning                   # daily briefing from overnight runs, tasks, and cited RAG
 sb status
 sb eval                      # retrieval benchmark (add --answers for chat-model checks)
 SB_COLLECTION=second_brain_regression sb eval evals/regression.json --ingest-corpus
@@ -157,6 +159,84 @@ What is the preferred front door for shared model routing?
 Learned memories are normal Markdown files in `SB_MEMORY_DIR`, so you can inspect, edit,
 delete, or re-ingest them. This keeps learning controlled: the system learns from what you
 teach it, not from unverified model guesses.
+
+## Overnight worker
+
+The overnight worker is the safe "make him smarter while I sleep" loop. It scans configured
+folders, ingests new or changed supported files, extracts likely tasks into a report, and
+writes an audit trail under `data/overnight/`. It does not edit, move, delete, send, or
+buy anything.
+
+First run it manually:
+
+```bash
+uv run sb overnight --dry-run
+uv run sb overnight
+```
+
+The first run creates `data/overnight/config.json`. Edit `targets` there to point at your
+real inboxes or synced Alienware folders. Reports land in `data/overnight/reports/`.
+
+To schedule it daily on the Mac Mini:
+
+```bash
+chmod +x deploy/install-overnight-service.sh
+SB_OVERNIGHT_HOUR=3 SB_OVERNIGHT_MINUTE=15 deploy/install-overnight-service.sh
+```
+
+Launchd runs `deploy/run-nightly.sh`, which refreshes project-context notes, performs
+`sb overnight`, syncs tasks, runs health checks, and then writes `sb morning`. Logs land
+in `data/overnight/logs/`. Keep the first few runs read-only and review the reports before
+giving Artjeck any action permissions beyond ingesting and reporting.
+
+## Morning briefing
+
+After the overnight worker runs, generate a daily briefing:
+
+```bash
+uv run sb morning
+```
+
+It writes a Markdown briefing under `data/morning/` with the latest overnight run, open
+tasks, possible follow-ups found in recent reports, and a project inventory from configured
+scan targets. To also ask the indexed brain with model calls:
+
+```bash
+uv run sb morning --rag
+```
+
+Refresh source-backed project notes any time:
+
+```bash
+uv run sb project-context --ingest
+```
+
+Sync explicit follow-ups into the durable task store:
+
+```bash
+uv run sb task-sync
+uv run sb task-sync --dry-run
+```
+
+Run read-only health checks for lab services and projects:
+
+```bash
+uv run sb health
+```
+
+Fetch a website into the brain as a cited source:
+
+```bash
+uv run sb web-check https://example.com
+uv run sb web-check https://example.com --no-ingest
+```
+
+For JavaScript-rendered pages, use a real browser capture:
+
+```bash
+uv run sb browser-check https://example.com
+uv run sb browser-check https://example.com --no-screenshot --no-ingest
+```
 
 `sb agent` starts the same conversation loop. The `artjeck` command is just the named
 shortcut intended for daily use.

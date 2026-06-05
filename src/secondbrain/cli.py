@@ -12,13 +12,20 @@ from rich.table import Table
 
 from .agent import run_turn
 from .ask import ask as ask_fn
+from .browser_check import DEFAULT_BROWSER_DIR, capture_url
 from .config import cfg
 from .evals import DEFAULT_BENCHMARK, load_benchmark, resolve_corpus_paths, run_benchmark, select_cases
 from .ingest import ingest_paths
 from .intake import PRIVATE_EVAL_DIR, build_private_artifacts, reset_session, run_intake
+from .health import run_health
 from .memory import learn as learn_memory
+from .morning import run_morning
+from .overnight import run_overnight
+from .project_context import DEFAULT_OUTPUT_DIR, write_project_context_notes
 from .store import Store
+from .task_sync import TaskCandidate, sync_tasks
 from .tracing import write_trace_export
+from .web_check import DEFAULT_WEB_DIR, check_url
 
 app = typer.Typer(add_completion=False, help="second-brain — ingest your stuff, ask, get cited answers.")
 console = Console()
@@ -320,6 +327,191 @@ def status():
             title="second-brain status",
         )
     )
+
+
+@app.command()
+def overnight(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Scan and report without ingesting or updating file state"),
+):
+    """Run the safe overnight scan: ingest changed files and write a morning report."""
+    try:
+        res = run_overnight(dry_run=dry_run)
+    except Exception as exc:
+        console.print(f"[red]overnight failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    stats = res["stats"]
+    chunks = "-" if res["total_chunks"] is None else str(res["total_chunks"])
+    console.print(
+        Panel(
+            f"scanned  : {stats['scanned']}\n"
+            f"changed  : {stats['changed']}\n"
+            f"ingested : {stats['ingested']}\n"
+            f"failed   : {stats['failed']}\n"
+            f"chunks   : {chunks}\n"
+            f"config   : {res['config']}\n"
+            f"report   : {res['report']}",
+            title="overnight complete",
+            border_style="green" if stats["failed"] == 0 else "yellow",
+        )
+    )
+
+
+@app.command()
+def morning(
+    rag: bool = typer.Option(False, "--rag", help="Include cited RAG summary from the indexed brain"),
+    k: int = typer.Option(cfg.top_k, "--k", help="Chunks to retrieve for each briefing question"),
+):
+    """Create a morning briefing from overnight activity, tasks, and cited brain answers."""
+    try:
+        res = run_morning(include_rag=rag, k=k)
+    except Exception as exc:
+        console.print(f"[red]morning failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(Panel(res["markdown"], title="morning briefing", border_style="cyan"))
+    console.print(f"[dim]saved: {res['path']}[/]")
+
+
+@app.command("project-context")
+def project_context(
+    output_dir: Path = typer.Option(DEFAULT_OUTPUT_DIR, "--output-dir", help="Where generated project notes are written"),
+    ingest: bool = typer.Option(True, "--ingest/--no-ingest", help="Ingest generated notes into the active vector store"),
+    limit: int = typer.Option(20, "--limit", help="Maximum project roots to summarize"),
+):
+    """Generate source-backed project notes for better morning briefings and RAG."""
+    try:
+        written = write_project_context_notes(output_dir=output_dir, limit=limit)
+        ingest_res = None
+        if ingest and written:
+            ingest_res = _ingest_path(str(output_dir))
+    except Exception as exc:
+        console.print(f"[red]project-context failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    lines = [f"wrote {len(written)} project context note(s)", f"output: {output_dir}"]
+    if ingest_res:
+        lines.append(
+            f"ingested {ingest_res['files']} file(s), {ingest_res['chunks']} chunk(s); "
+            f"collection chunks: {ingest_res['total']}"
+        )
+    for path in written:
+        lines.append(f"- {path}")
+    console.print(Panel("\n".join(lines), title="project context", border_style="green"))
+
+
+@app.command("task-sync")
+def task_sync(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show tasks that would be added without writing"),
+):
+    """Import explicit project follow-ups into the task store with dedupe."""
+    try:
+        res = sync_tasks(dry_run=dry_run)
+    except Exception as exc:
+        console.print(f"[red]task-sync failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    added = res["added"]
+    skipped = res["skipped"]
+    lines = [
+        f"mode: {'dry run' if dry_run else 'write'}",
+        f"added: {len(added)}",
+        f"skipped existing: {len(skipped)}",
+    ]
+    if added:
+        lines.append("")
+        lines.append("Added:")
+        for item in added:
+            if isinstance(item, TaskCandidate):
+                lines.append(f"- {item.title} ({item.source})")
+            else:
+                lines.append(f"- #{item['id']}: {item['title']}")
+    if skipped:
+        lines.append("")
+        lines.append("Skipped:")
+        for item in skipped:
+            lines.append(f"- {item.title}")
+    console.print(Panel("\n".join(lines), title="task sync", border_style="green"))
+
+
+@app.command("web-check")
+def web_check(
+    url: str = typer.Argument(..., help="HTTP(S) URL to fetch and save as a source-backed note"),
+    output_dir: Path = typer.Option(DEFAULT_WEB_DIR, "--output-dir", help="Where web notes are written"),
+    ingest: bool = typer.Option(True, "--ingest/--no-ingest", help="Ingest the saved web note into the active vector store"),
+    timeout: int = typer.Option(20, "--timeout", help="Fetch timeout in seconds"),
+):
+    """Fetch a web page, extract readable text, save a note, and optionally ingest it."""
+    try:
+        res = check_url(url, output_dir=output_dir, timeout_s=timeout)
+        ingest_res = None
+        if ingest:
+            ingest_res = _ingest_path(str(res["path"]))
+    except Exception as exc:
+        console.print(f"[red]web-check failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    page = res["page"]
+    lines = [
+        f"title   : {page.title}",
+        f"url     : {page.final_url}",
+        f"status  : {page.status}",
+        f"saved   : {res['path']}",
+    ]
+    if ingest_res:
+        lines.append(
+            f"ingest  : {ingest_res['files']} file(s), {ingest_res['chunks']} chunk(s); "
+            f"collection chunks: {ingest_res['total']}"
+        )
+    console.print(Panel("\n".join(lines), title="web check", border_style="green"))
+
+
+@app.command("browser-check")
+def browser_check(
+    url: str = typer.Argument(..., help="HTTP(S) URL to open in a real browser and save as a source-backed note"),
+    output_dir: Path = typer.Option(DEFAULT_BROWSER_DIR, "--output-dir", help="Where browser notes and screenshots are written"),
+    ingest: bool = typer.Option(True, "--ingest/--no-ingest", help="Ingest the saved browser note into the active vector store"),
+    screenshot: bool = typer.Option(True, "--screenshot/--no-screenshot", help="Save a full-page screenshot"),
+    timeout: int = typer.Option(30, "--timeout", help="Navigation timeout in seconds"),
+    wait_until: str = typer.Option("networkidle", "--wait-until", help="Playwright wait state: load, domcontentloaded, networkidle, commit"),
+):
+    """Open a page with Playwright, extract rendered text, save a note, and optionally ingest it."""
+    try:
+        res = capture_url(
+            url,
+            output_dir=output_dir,
+            timeout_ms=timeout * 1000,
+            wait_until=wait_until,
+            screenshot=screenshot,
+        )
+        ingest_res = None
+        if ingest:
+            ingest_res = _ingest_path(str(res["path"]))
+    except Exception as exc:
+        console.print(f"[red]browser-check failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    page = res["page"]
+    lines = [
+        f"title     : {page.title}",
+        f"url       : {page.final_url}",
+        f"saved     : {res['path']}",
+        f"screenshot: {page.screenshot or 'not captured'}",
+    ]
+    if ingest_res:
+        lines.append(
+            f"ingest    : {ingest_res['files']} file(s), {ingest_res['chunks']} chunk(s); "
+            f"collection chunks: {ingest_res['total']}"
+        )
+    console.print(Panel("\n".join(lines), title="browser check", border_style="green"))
+
+
+@app.command()
+def health(
+    timeout: int = typer.Option(45, "--timeout", help="Per-check timeout in seconds"),
+):
+    """Run read-only service and project health checks."""
+    try:
+        res = run_health(timeout_s=timeout)
+    except Exception as exc:
+        console.print(f"[red]health failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(Panel(res["markdown"], title="health", border_style="green" if res["failed"] == 0 else "yellow"))
+    console.print(f"[dim]saved: {res['path']}[/]")
 
 
 if __name__ == "__main__":
