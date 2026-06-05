@@ -96,7 +96,7 @@ TODO: wire nightly report
 """.strip()
         + "\n"
     )
-    monkeypatch.setattr(pc, "discover_project_roots", lambda limit=20: [project])
+    monkeypatch.setattr(pc, "discover_project_roots", lambda limit=20, **_: [project])
 
     written = write_project_context_notes(output_dir=tmp_path / "out")
     text = (tmp_path / "out" / "agent.md").read_text()
@@ -142,3 +142,56 @@ def test_render_active_projects_index_lists_all_contexts(tmp_path):
     assert "# Active Projects Index" in markdown
     assert "agent: Local agent project" in markdown
     assert "agent: wire nightly report" in markdown
+
+
+def test_collect_project_context_completes_quickly_on_temp_tree(tmp_path, monkeypatch):
+    import time
+
+    import secondbrain.project_context as pc
+
+    parent = tmp_path / "projects"
+    parent.mkdir()
+    for i in range(6):
+        project = parent / f"proj{i}"
+        (project / "docs").mkdir(parents=True)
+        (project / "pyproject.toml").write_text(
+            f'[project]\nname = "proj{i}"\ndescription = "Project number {i}"\n'
+        )
+        (project / "README.md").write_text(
+            f"# proj{i}\n\nProject number {i} does useful things.\n\n- [ ] finish proj{i}\n"
+        )
+    monkeypatch.setattr(pc, "configured_targets", lambda: [parent])
+
+    start = time.monotonic()
+    contexts = collect_project_context(limit=10)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 5  # bounded; a healthy temp-tree run is near-instant
+    names = {context.name for context in contexts}
+    assert {f"proj{i}" for i in range(6)} <= names
+    assert any("finish proj0" in item for context in contexts for item in context.follow_ups)
+
+
+def test_collect_project_context_is_bounded_when_filesystem_stalls(tmp_path, monkeypatch):
+    """A stalled filesystem op on one target must not blow the wall-clock budget:
+    the run abandons it and still completes (the launchd nightly never hangs)."""
+    import time
+
+    import secondbrain.project_context as pc
+
+    project = tmp_path / "agent"
+    project.mkdir()
+    (project / "pyproject.toml").write_text('[project]\nname = "agent"\ndescription = "Agent"\n')
+    monkeypatch.setattr(pc, "configured_targets", lambda: [project])
+
+    def _stall(*_args, **_kwargs):
+        time.sleep(30)  # simulate a hung SMB stat/iterdir
+
+    monkeypatch.setattr(pc, "_target_candidates", _stall)
+
+    start = time.monotonic()
+    contexts = collect_project_context(limit=5, budget=0.5)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 5  # abandoned after ~budget, not after 30s
+    assert contexts == []  # nothing discovered, but the run returned cleanly
