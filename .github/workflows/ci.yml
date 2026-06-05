@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Tests are hermetic: model/gateway/Qdrant are never called. Point them at
+    # an unreachable address so a regression that adds a live call fails loudly
+    # instead of silently depending on the home lab.
+    env:
+      SB_STORE: chroma
+      OPENAI_API_KEY: test-key
+      OPENAI_BASE_URL: http://127.0.0.1:9/v1
+      QDRANT_URL: http://127.0.0.1:9
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Run tests
+        run: uv run --frozen pytest -q
