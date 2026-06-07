@@ -28,6 +28,8 @@ code**, with **every claim cited**, and whose answer quality is **graded by an e
 
 ## 5. Out of scope
 - Multi-user / cloud SaaS hosting. Web-scale crawling.
+- `/weather` and `/system` are convenience tools layered on the agent loop; they are not part of
+  the cited-RAG core.
 
 ## 6. Acceptance criteria
 - Every answer carries source citations. ✓
