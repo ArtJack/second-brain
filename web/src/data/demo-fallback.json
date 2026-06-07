@@ -1,0 +1,158 @@
+{
+  "public": {
+    "label": "Lab",
+    "prompts": [
+      "How does hybrid retrieval work?",
+      "How does reranking improve retrieval quality?",
+      "Show the flow for indexing new documents."
+    ],
+    "answers": {
+      "How does hybrid retrieval work?": {
+        "answer": "Hybrid retrieval combines dense vector search with a small keyword retriever so exact section names and paraphrased questions can both land on useful evidence. The retrieved sets are merged, adjacent chunks can be pulled in for continuity, and the answer still has to cite the numbered context [1][2].",
+        "latencyMs": 812,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "docs/design.md",
+            "type": "Markdown",
+            "distance": 0.22,
+            "retrieval": "keyword",
+            "text": "### Hybrid Retrieval\n\nThe system combines sparse keyword matching and dense semantic retrieval. Keyword search rescues exact section/list lookups, while vector search handles paraphrased questions. Results are merged before the answer is generated from numbered context."
+          },
+          {
+            "n": 2,
+            "source": "README.md",
+            "type": "Markdown",
+            "distance": 0.243,
+            "retrieval": "vector",
+            "text": "second-brain is a local-first RAG assistant. It ingests notes, docs, and code, retrieves relevant chunks, and answers with inline citations so claims can be traced back to source files."
+          },
+          {
+            "n": 3,
+            "source": "docs/EVALUATION.md",
+            "type": "Markdown",
+            "distance": 0.321,
+            "retrieval": "vector",
+            "text": "The eval harness measures retrieval hit-rate, source recall, grounded-answer checks, and abstention behavior over a synthetic regression corpus."
+          },
+          {
+            "n": 4,
+            "source": "docs/MCP.md",
+            "type": "Markdown",
+            "distance": 0.365,
+            "retrieval": "keyword-adjacent",
+            "text": "The MCP server exposes ask and recall as read-only tools, while ingest, learn, and task mutations are marked as write operations."
+          }
+        ],
+        "invalid_citations": []
+      },
+      "How does reranking improve retrieval quality?": {
+        "answer": "The current public demo focuses on retrieval fusion rather than a separate reranker. The important quality control is that every answer is checked against numbered retrieved chunks, and retrieval quality is measured through source recall and grounded-answer evaluations [1][2].",
+        "latencyMs": 744,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "docs/EVALUATION.md",
+            "type": "Markdown",
+            "distance": 0.277,
+            "retrieval": "vector",
+            "text": "Evaluation reports include retrieval pass/fail, first relevant rank, source recall, MRR, and grounded-answer rubric checks."
+          },
+          {
+            "n": 2,
+            "source": "docs/design.md",
+            "type": "Markdown",
+            "distance": 0.304,
+            "retrieval": "keyword",
+            "text": "Retrieval is treated as an auditable path: store count, embedding, retrieval, and generation are recorded as spans when tracing is enabled."
+          }
+        ],
+        "invalid_citations": []
+      },
+      "Show the flow for indexing new documents.": {
+        "answer": "Indexing reads supported files, chunks text with overlap, embeds the chunks, deletes stale chunks for the same source, and upserts the fresh chunks into the selected collection [1][2].",
+        "latencyMs": 693,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "README.md",
+            "type": "Markdown",
+            "distance": 0.238,
+            "retrieval": "vector",
+            "text": "Run `sb ingest <path>` to discover files, chunk their text, embed the chunks, and store them for cited retrieval."
+          },
+          {
+            "n": 2,
+            "source": "docs/design.md",
+            "type": "Markdown",
+            "distance": 0.292,
+            "retrieval": "keyword",
+            "text": "Ingestion uses a simple robust character window with overlap, then writes chunk metadata including source path, filename, and chunk index."
+          }
+        ],
+        "invalid_citations": []
+      }
+    }
+  },
+  "neutral": {
+    "label": "Neutral",
+    "prompts": [
+      "What are the seven testing principles?",
+      "How should a regression suite be scoped?",
+      "What makes a test case traceable?"
+    ],
+    "answers": {
+      "What are the seven testing principles?": {
+        "answer": "A neutral QA corpus answer would list principles such as testing shows the presence of defects, exhaustive testing is impossible, early testing saves cost, defects cluster, repeated tests lose effectiveness, testing is context dependent, and absence-of-errors does not prove usefulness [1].",
+        "latencyMs": 865,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "evals/corpus/testing-principles.md",
+            "type": "Markdown",
+            "distance": 0.251,
+            "retrieval": "keyword",
+            "text": "Synthetic QA notes: seven testing principles cover defect presence, impossibility of exhaustive testing, early testing, defect clustering, pesticide paradox, context dependence, and absence-of-errors fallacy."
+          }
+        ],
+        "invalid_citations": []
+      },
+      "How should a regression suite be scoped?": {
+        "answer": "A regression suite should cover changed behavior, high-risk integrations, previously failed areas, and stable smoke paths. The useful set is small enough to run often and traceable enough to explain why each test exists [1].",
+        "latencyMs": 701,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "evals/corpus/regression-scope.md",
+            "type": "Markdown",
+            "distance": 0.289,
+            "retrieval": "vector",
+            "text": "Synthetic QA notes: regression coverage should prioritize changed code, critical business flows, integrations, historical defects, and smoke checks that guard release readiness."
+          }
+        ],
+        "invalid_citations": []
+      },
+      "What makes a test case traceable?": {
+        "answer": "A traceable test case points back to a requirement, risk, defect, or acceptance rule, and its expected result is specific enough that a reviewer can see what evidence the test provides [1].",
+        "latencyMs": 722,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "evals/corpus/test-design.md",
+            "type": "Markdown",
+            "distance": 0.31,
+            "retrieval": "keyword",
+            "text": "Synthetic QA notes: traceability connects a test to a requirement or risk, names the condition being checked, and records the expected observable result."
+          }
+        ],
+        "invalid_citations": []
+      }
+    }
+  }
+}

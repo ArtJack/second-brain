@@ -70,7 +70,7 @@ question ──▶ LangGraph ──ask──▶ Store.query ──top-k──▶
 - [x] **Hybrid search** (vector + BM25 keyword) — keyword rescue for exact section/list lookups, off via `SB_HYBRID=0`
 - [x] Wrap as an **MCP server** so Claude Desktop / Claude Code can query your brain directly ([docs](docs/MCP.md))
 - [x] **Eval harness**: benchmarks, rubric checks, local traces/spans, and trajectories ([docs](docs/EVALUATION.md))
-- [ ] Web UI (Next.js) + deploy → the public-URL portfolio piece
+- [~] **Web UI** (Next.js) — anonymous cited-Q&A demo live; owner mode + sandbox in progress
 
 ## MCP server
 

@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f8f9;
+  --foreground: #18212b;
+  --surface: #ffffff;
+  --surface-muted: #f0f4f5;
+  --border: #d9e1e4;
+  --border-strong: #b8c5ca;
+  --muted: #66727d;
+  --accent: #007f72;
+  --accent-strong: #00695f;
+  --accent-soft: #e5f4f1;
+  --amber: #b7791f;
+  --amber-soft: #fff7e6;
+  --danger: #b42318;
+  --danger-soft: #fff1f0;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  min-width: 320px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 248, 249, 0.95)),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-feature-settings: "tnum" on, "ss01" on, "cv11" on;
+  font-variant-numeric: tabular-nums;
+  text-rendering: geometricPrecision;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 127, 114, 0.24) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
