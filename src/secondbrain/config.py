@@ -32,6 +32,7 @@ class Config:
         self.chunk_size: int = int(os.getenv("SB_CHUNK_SIZE", "1200"))
         self.chunk_overlap: int = int(os.getenv("SB_CHUNK_OVERLAP", "150"))
         self.top_k: int = int(os.getenv("SB_TOP_K", "5"))
+        self.weather_location: str | None = os.getenv("SB_WEATHER_LOCATION") or None
 
 
 cfg = Config()

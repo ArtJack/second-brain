@@ -42,13 +42,14 @@ def _decimal(value: float | None) -> str:
     return "-" if value is None else f"{value:.3f}"
 
 
-def _print_answer(res: dict, show_distance: bool = True) -> None:
+def _print_answer(res: dict, show_distance: bool = True, show_sources: bool = True) -> None:
     console.print(Panel(res["answer"], title="answer", border_style="cyan"))
-    for s in res["sources"]:
-        if show_distance:
-            console.print(f"  [cyan][{s['n']}][/] {s['source']} [dim](dist {s['distance']:.3f})[/]")
-        else:
-            console.print(f"  [cyan][{s['n']}][/] {s['source']}", style="dim")
+    if show_sources:
+        for s in res["sources"]:
+            if show_distance:
+                console.print(f"  [cyan][{s['n']}][/] {s['source']} [dim](dist {s['distance']:.3f})[/]")
+            else:
+                console.print(f"  [cyan][{s['n']}][/] {s['source']}", style="dim")
     invalid = res.get("invalid_citations") or []
     if invalid:
         refs = ", ".join(f"[{n}]" for n in invalid)
@@ -298,7 +299,11 @@ def agent():
             console.print(f"[red]turn failed:[/] {exc}")
             continue
         if res.get("action") == "ask":
-            _print_answer({"answer": res.get("answer", ""), "sources": res.get("sources", [])}, show_distance=False)
+            _print_answer(
+                {"answer": res.get("answer", ""), "sources": res.get("sources", [])},
+                show_distance=False,
+                show_sources=False,
+            )
         else:
             title = f"{AGENT_NAME} commands" if res.get("action") == "help" else AGENT_NAME
             console.print(Panel(res.get("answer", ""), title=title, border_style="cyan"))
