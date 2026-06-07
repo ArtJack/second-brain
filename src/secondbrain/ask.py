@@ -5,6 +5,7 @@ from contextlib import nullcontext
 
 from .citations import invalid_citations
 from .config import cfg
+from .hybrid import hybrid_retrieve
 from .llm import answer, embed
 from .store import Store
 from .tracing import TraceRecorder
@@ -50,7 +51,8 @@ def ask(
             embed_span.add_attributes({"vector_dimensions": len(qvec)})
             embed_span.set_summary({"vector_dimensions": len(qvec)})
     with _span(trace, "retrieve_context", kind="retrieval", parent_span_id=parent_span_id) as retrieve_span:
-        hits = store.query(qvec, k or cfg.top_k)
+        limit = k or cfg.top_k
+        hits = hybrid_retrieve(store, question, qvec, limit, enabled=cfg.hybrid_enabled)
         if retrieve_span:
             retrieve_span.add_attributes({"hit_count": len(hits), "top_k": k or cfg.top_k})
             retrieve_span.set_summary({"hit_count": len(hits)})
@@ -59,7 +61,14 @@ def ask(
     for i, h in enumerate(hits, start=1):
         meta = h["metadata"]
         context_parts.append(f"[{i}] (from {meta.get('name', meta.get('source'))})\n{h['document']}")
-        sources.append({"n": i, "source": meta.get("source", "?"), "distance": h["distance"]})
+        sources.append(
+            {
+                "n": i,
+                "source": meta.get("source", "?"),
+                "distance": h["distance"],
+                "retrieval": h.get("retrieval", "vector"),
+            }
+        )
 
     with _span(trace, "generate_answer", kind="llm", parent_span_id=parent_span_id) as answer_span:
         answer_text = answer(question, "\n\n".join(context_parts))
