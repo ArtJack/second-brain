@@ -15,6 +15,7 @@ from typing import Any
 from .ask import ask
 from .citations import cited_numbers, invalid_citations
 from .config import cfg
+from .hybrid import hybrid_retrieve
 from .llm import embed
 from .store import Store
 from .tracing import TraceRecorder, summarize_traces
@@ -132,7 +133,8 @@ def _default_retrieve(query: str, top_k: int) -> list[dict]:
     store = Store()
     if store.count() == 0:
         return []
-    return store.query(embed([query])[0], top_k)
+    qvec = embed([query])[0]
+    return hybrid_retrieve(store, query, qvec, top_k, enabled=cfg.hybrid_enabled)
 
 
 def _default_answer(

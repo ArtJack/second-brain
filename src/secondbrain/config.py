@@ -33,6 +33,12 @@ class Config:
         self.chunk_overlap: int = int(os.getenv("SB_CHUNK_OVERLAP", "150"))
         self.top_k: int = int(os.getenv("SB_TOP_K", "5"))
         self.weather_location: str | None = os.getenv("SB_WEATHER_LOCATION") or None
+        self.hybrid_enabled: bool = os.getenv("SB_HYBRID", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
 
 
 cfg = Config()

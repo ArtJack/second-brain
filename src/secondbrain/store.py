@@ -46,6 +46,32 @@ class ChromaStore:
             hits.append({"document": doc, "metadata": meta, "distance": dist})
         return hits
 
+    def documents(self, batch_size: int = 500):
+        """Return all stored documents for lightweight local keyword search."""
+        hits = []
+        total = self.count()
+        for offset in range(0, total, batch_size):
+            res = self._col.get(
+                limit=batch_size,
+                offset=offset,
+                include=["documents", "metadatas"],
+            )
+            for doc, meta in zip(res.get("documents") or [], res.get("metadatas") or []):
+                hits.append({"document": doc or "", "metadata": meta or {}, "distance": 1.0})
+        return hits
+
+    def get_source_chunk(self, source: str, chunk: int):
+        res = self._col.get(
+            where={"$and": [{"source": source}, {"chunk": chunk}]},
+            limit=1,
+            include=["documents", "metadatas"],
+        )
+        docs = res.get("documents") or []
+        metadatas = res.get("metadatas") or []
+        if not docs:
+            return None
+        return {"document": docs[0] or "", "metadata": metadatas[0] or {}, "distance": 1.0}
+
     def count(self) -> int:
         return self._col.count()
 
@@ -158,6 +184,61 @@ class QdrantStore:
                 }
             )
         return results
+
+    def documents(self, batch_size: int = 500):
+        """Return all stored documents for lightweight local keyword search."""
+        if not self._exists():
+            return []
+        results = []
+        offset = None
+        while True:
+            points, offset = self._client.scroll(
+                collection_name=self._collection,
+                limit=batch_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                payload = point.payload or {}
+                metadata = {key: value for key, value in payload.items() if key != "document"}
+                results.append(
+                    {
+                        "document": payload.get("document", ""),
+                        "metadata": metadata,
+                        "distance": 1.0,
+                    }
+                )
+            if offset is None:
+                break
+        return results
+
+    def get_source_chunk(self, source: str, chunk: int):
+        if not self._exists():
+            return None
+        response, _ = self._client.scroll(
+            collection_name=self._collection,
+            scroll_filter=self._models.Filter(
+                must=[
+                    self._models.FieldCondition(
+                        key="source",
+                        match=self._models.MatchValue(value=source),
+                    ),
+                    self._models.FieldCondition(
+                        key="chunk",
+                        match=self._models.MatchValue(value=chunk),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not response:
+            return None
+        payload = response[0].payload or {}
+        metadata = {key: value for key, value in payload.items() if key != "document"}
+        return {"document": payload.get("document", ""), "metadata": metadata, "distance": 1.0}
 
     def count(self) -> int:
         if not self._exists():

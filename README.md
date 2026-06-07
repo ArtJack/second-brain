@@ -31,6 +31,10 @@ sb eval-intake               # build a private 100-question benchmark in the ter
 - **Citations are mandatory.** The system prompt forces the model to answer *only* from
   retrieved context and cite `[n]`; the CLI prints the source files + distances. No source,
   no claim — that's the trust signal that separates a real RAG product from a demo.
+- **Hybrid retrieval rescues exact lookups.** Vector search finds semantic matches; a tiny
+  local BM25 pass rescues exact section/list lookups embeddings miss. Results are fused and
+  de-duplicated, keyword hits expand to adjacent chunks, and every answer still has to be
+  cited. `SB_HYBRID` toggles it for A/B checks.
 - **Learning is explicit and inspectable.** `sb learn` and `/learn` in agent mode write
   Markdown memory files under `SB_MEMORY_DIR`, then ingest them through the same cited RAG
   pipeline. The model does not silently save its own guesses as truth.
@@ -63,7 +67,7 @@ question ──▶ LangGraph ──ask──▶ Store.query ──top-k──▶
 - [x] Swap Chroma → lab **Qdrant** (hosted vector DB)
 - [x] Explicit learned memory (`sb learn`, `/learn` in agent mode)
 - [x] LangGraph turn workflow + SQLite task store
-- [ ] **Hybrid search** (vector + BM25 keyword) + reranking
+- [x] **Hybrid search** (vector + BM25 keyword) — keyword rescue for exact section/list lookups, off via `SB_HYBRID=0`
 - [x] Wrap as an **MCP server** so Claude Desktop / Claude Code can query your brain directly ([docs](docs/MCP.md))
 - [x] **Eval harness**: benchmarks, rubric checks, local traces/spans, and trajectories ([docs](docs/EVALUATION.md))
 - [ ] Web UI (Next.js) + deploy → the public-URL portfolio piece
@@ -90,7 +94,7 @@ Inspect interactively with `npx @modelcontextprotocol/inspector`.
 
 `.env` (see `.env.example` / `.env.gateway.example`): `OPENAI_BASE_URL`, `OPENAI_API_KEY`,
 `EMBED_MODEL`, `CHAT_MODEL`, `SB_STORE`, `SB_COLLECTION`, `SB_MEMORY_DIR`, `SB_STATE_DB`,
-and retrieval knobs `SB_CHUNK_SIZE` / `SB_CHUNK_OVERLAP` / `SB_TOP_K`.
+and retrieval knobs `SB_CHUNK_SIZE` / `SB_CHUNK_OVERLAP` / `SB_TOP_K` / `SB_HYBRID`.
 
 ### Chroma default
 
