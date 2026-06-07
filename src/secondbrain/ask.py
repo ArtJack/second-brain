@@ -29,10 +29,11 @@ def ask(
     question: str,
     k: int | None = None,
     *,
+    collection: str | None = None,
     trace: TraceRecorder | None = None,
     parent_span_id: str | None = None,
 ) -> dict:
-    store = Store()
+    store = Store(collection=collection)
     with _span(trace, "store_count", kind="store", parent_span_id=parent_span_id) as count_span:
         chunks = store.count()
         if count_span:
@@ -79,4 +80,25 @@ def ask(
         "answer": answer_text,
         "sources": sources,
         "invalid_citations": invalid_citations(answer_text, len(sources)),
+    }
+
+
+def recall(query: str, top_k: int = 0, collection: str | None = None) -> dict:
+    """Retrieve raw matching chunks without calling the chat model."""
+    store = Store(collection=collection)
+    if store.count() == 0:
+        return {"count": 0, "hits": []}
+    k = top_k if top_k and top_k > 0 else cfg.top_k
+    qvec = embed([query])[0]
+    hits = store.query(qvec, k)
+    return {
+        "count": len(hits),
+        "hits": [
+            {
+                "source": h["metadata"].get("source", "?"),
+                "distance": round(h["distance"], 4),
+                "text": h["document"],
+            }
+            for h in hits
+        ],
     }

@@ -34,9 +34,9 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 from .ask import ask as ask_fn
+from .ask import recall as recall_fn
 from .config import cfg
 from .ingest import ingest_paths
-from .llm import embed
 from .memory import learn as learn_memory
 from .store import Store
 from .tasks import TaskStore
@@ -114,23 +114,7 @@ def recall(query: str, top_k: int = 0) -> dict:
         query: What to search for.
         top_k: How many chunks to return (0 = configured default).
     """
-    store = Store()
-    if store.count() == 0:
-        return {"count": 0, "hits": []}
-    k = top_k if top_k and top_k > 0 else cfg.top_k
-    qvec = embed([query])[0]
-    hits = store.query(qvec, k)
-    return {
-        "count": len(hits),
-        "hits": [
-            {
-                "source": h["metadata"].get("source", "?"),
-                "distance": round(h["distance"], 4),
-                "text": h["document"],
-            }
-            for h in hits
-        ],
-    }
+    return recall_fn(query, top_k=top_k)
 
 
 @mcp.tool(annotations=_WRITE)

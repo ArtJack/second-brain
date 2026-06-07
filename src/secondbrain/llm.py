@@ -5,6 +5,8 @@ speaks the OpenAI API — that portability is the whole point of routing through
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from openai import OpenAI
 
 from .config import cfg
@@ -42,3 +44,25 @@ def answer(question: str, context: str) -> str:
         temperature=0.1,
     )
     return resp.choices[0].message.content or ""
+
+
+def answer_stream(question: str, context: str) -> Iterator[str]:
+    """Stream an answer grounded ONLY in the supplied context, yielding text deltas."""
+    system = (
+        "You are the user's personal knowledge assistant. Answer the question using ONLY "
+        "the numbered context below. Cite the sources you used inline as [1], [2], etc. "
+        "If the context does not contain the answer, say so plainly — do not invent facts."
+    )
+    user = f"Context:\n{context}\n\nQuestion: {question}"
+    stream = _client.chat.completions.create(
+        model=cfg.chat_model,
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        temperature=0.1,
+        stream=True,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content
