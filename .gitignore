@@ -7,9 +7,12 @@ __pycache__/
 # Secrets / local config
 .env
 .env.gateway
+web/.env*
+!web/.env.example
+web/node_modules/
 
 # Local vector store + ingested data
-data/
+/data/
 *.sqlite3
 
 # OS
