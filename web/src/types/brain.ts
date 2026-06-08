@@ -1,4 +1,5 @@
-export type Corpus = "public" | "neutral";
+export type PublicCorpus = "public" | "neutral";
+export type Corpus = PublicCorpus | "real";
 
 export type BrainSource = {
   n: number;
@@ -23,7 +24,7 @@ export type CorpusFallback = {
   answers: Record<string, BrainAnswer>;
 };
 
-export type FallbackData = Record<Corpus, CorpusFallback>;
+export type FallbackData = Record<PublicCorpus, CorpusFallback>;
 
 export type BrainStatus = {
   corpus: Corpus;

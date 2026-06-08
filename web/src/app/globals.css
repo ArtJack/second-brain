@@ -48,6 +48,7 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
