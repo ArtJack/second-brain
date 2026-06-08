@@ -4,6 +4,7 @@ import {
   Activity,
   AlertTriangle,
   BookOpen,
+  Brain,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -13,7 +14,11 @@ import {
   ExternalLink,
   FileText,
   FlaskConical,
+  KeyRound,
   Loader2,
+  LockKeyhole,
+  LogIn,
+  LogOut,
   Moon,
   RefreshCw,
   Scale,
@@ -23,15 +28,19 @@ import {
   TerminalSquare,
   Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { signIn, signOut, useSession } from "next-auth/react";
+import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { OwnerPanel } from "@/components/owner-panel";
 import fallbackJson from "@/data/demo-fallback.json";
-import type { BrainAnswer, BrainSource, BrainStatus, ChatMessage, Corpus, FallbackData } from "@/types/brain";
+import type { BrainAnswer, BrainSource, BrainStatus, ChatMessage, Corpus, FallbackData, PublicCorpus } from "@/types/brain";
 import { TurnstileField } from "@/components/turnstile-field";
 
 const fallback = fallbackJson as FallbackData;
 
-const corpusMeta: Record<Corpus, { label: string; icon: typeof FlaskConical; description: string }> = {
+const corpusMeta: Record<Corpus, { label: string; icon: LucideIcon; description: string }> = {
   public: {
     label: "Lab",
     icon: FlaskConical,
@@ -42,6 +51,25 @@ const corpusMeta: Record<Corpus, { label: string; icon: typeof FlaskConical; des
     icon: Scale,
     description: "Synthetic QA corpus",
   },
+  real: {
+    label: "Real",
+    icon: Brain,
+    description: "Owner-only private brain",
+  },
+};
+
+const realPrompts = [
+  "What needs attention today?",
+  "Summarize the open tasks.",
+  "What should I follow up on?",
+];
+
+const realFallback: BrainAnswer = {
+  answer: "Owner mode is private and only answers from the live brain API. Start the API with the owner token configured, then ask again.",
+  latencyMs: 0,
+  model: "owner backend",
+  sources: [],
+  invalid_citations: [],
 };
 
 function nowTime() {
@@ -57,13 +85,22 @@ function messageId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function isPublicCorpus(corpus: Corpus): corpus is PublicCorpus {
+  return corpus === "public" || corpus === "neutral";
+}
+
+function promptsFor(corpus: Corpus) {
+  return isPublicCorpus(corpus) ? fallback[corpus].prompts : realPrompts;
+}
+
 function answerFor(corpus: Corpus, prompt: string): BrainAnswer {
+  if (!isPublicCorpus(corpus)) return realFallback;
   const corpusFallback = fallback[corpus];
   return corpusFallback.answers[prompt] ?? Object.values(corpusFallback.answers)[0];
 }
 
 function initialMessages(corpus: Corpus): ChatMessage[] {
-  const prompt = fallback[corpus].prompts[0];
+  const prompt = promptsFor(corpus)[0];
   const answer = answerFor(corpus, prompt);
   return [
     {
@@ -150,6 +187,8 @@ async function readStatus(corpus: Corpus): Promise<StatusSnapshot> {
 }
 
 export function BrainApp() {
+  const { data: session, status: authStatus } = useSession();
+  const isOwner = session?.user?.role === "owner";
   const [corpus, setCorpus] = useState<Corpus>("public");
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialMessages("public"));
   const [question, setQuestion] = useState("");
@@ -169,6 +208,7 @@ export function BrainApp() {
   const invalidCitations = latestAssistant?.invalidCitations ?? [];
   const activeSource = sources[Math.min(selectedSource, Math.max(sources.length - 1, 0))];
   const meta = corpusMeta[corpus];
+  const availableCorpora = useMemo<Corpus[]>(() => (isOwner ? ["public", "neutral", "real"] : ["public", "neutral"]), [isOwner]);
 
   const applyStatusSnapshot = useCallback((snapshot: StatusSnapshot) => {
     setHealth(snapshot.health);
@@ -342,14 +382,15 @@ export function BrainApp() {
   );
 
   const selectCorpus = useCallback((nextCorpus: Corpus) => {
+    if (nextCorpus === "real" && !isOwner) return;
     setCorpus(nextCorpus);
     setMessages(initialMessages(nextCorpus));
     setSelectedSource(0);
     setQuestion("");
     setHealth("checking");
-  }, []);
+  }, [isOwner]);
 
-  const prompts = fallback[corpus].prompts;
+  const prompts = promptsFor(corpus);
   const sourceCount = sources.length;
   const uniqueSources = new Set(sources.map((source) => source.source)).size;
   const modelLabel = latestAssistant?.model?.includes("claude") ? "Claude" : "local model";
@@ -371,11 +412,12 @@ export function BrainApp() {
           <IconButton label="Open console" icon={TerminalSquare} />
           <IconButton label="Docs" icon={BookOpen} />
           <IconButton label="Theme" icon={Moon} />
-          <div className="ml-1 hidden items-center gap-2 rounded-md border border-[var(--border)] bg-white px-2 py-1.5 sm:flex">
-            <CircleUserRound className="size-5 text-slate-500" />
-            <span>Anonymous</span>
-            <ChevronDown className="size-4 text-slate-500" />
-          </div>
+          <AuthControl
+            isLoading={authStatus === "loading"}
+            isOwner={isOwner}
+            ownerName={session?.user?.name ?? "Owner"}
+            onSignedOut={() => selectCorpus("public")}
+          />
         </div>
       </header>
 
@@ -383,7 +425,7 @@ export function BrainApp() {
         <section className="border-b border-[var(--border)] bg-white/72 p-4 lg:border-r lg:border-b-0 lg:p-5">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h1 className="text-base font-semibold text-slate-950">Ask the lab</h1>
+              <h1 className="text-base font-semibold text-slate-950">{corpus === "real" ? "Ask the brain" : "Ask the lab"}</h1>
               <p className="mt-1 text-xs text-[var(--muted)]">{meta.description}</p>
             </div>
             <button
@@ -397,8 +439,8 @@ export function BrainApp() {
             </button>
           </div>
 
-          <div className="mb-3 grid grid-cols-2 gap-2">
-            {(Object.keys(corpusMeta) as Corpus[]).map((key) => {
+          <div className={`mb-3 grid gap-2 ${availableCorpora.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
+            {availableCorpora.map((key) => {
               const Icon = corpusMeta[key].icon;
               const active = corpus === key;
               return (
@@ -435,7 +477,7 @@ export function BrainApp() {
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Ask a question about the lab..."
+              placeholder={corpus === "real" ? "Ask your private brain..." : "Ask a question about the lab..."}
               className="min-h-24 w-full resize-none rounded-t-md border-0 bg-transparent px-3 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400"
               maxLength={4000}
               onKeyDown={(event) => {
@@ -482,7 +524,7 @@ export function BrainApp() {
             </div>
           </div>
 
-          <TurnstileField onToken={setTurnstileToken} onExpire={() => setTurnstileToken("")} />
+          {isOwner ? <OwnerPanel onMutation={refreshStatus} /> : <TurnstileField onToken={setTurnstileToken} onExpire={() => setTurnstileToken("")} />}
         </section>
 
         <section className="bg-[var(--surface)] p-4 lg:p-5">
@@ -665,6 +707,122 @@ function IconButton({
     >
       <Icon className="size-4" />
     </button>
+  );
+}
+
+function AuthControl({
+  isLoading,
+  isOwner,
+  onSignedOut,
+  ownerName,
+}: {
+  isLoading: boolean;
+  isOwner: boolean;
+  onSignedOut: () => void;
+  ownerName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [username, setUsername] = useState("ArtJack");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    const result = await signIn("credentials", {
+      redirect: false,
+      username,
+      password,
+    });
+    setSubmitting(false);
+    if (result?.ok) {
+      setPassword("");
+      setOpen(false);
+      return;
+    }
+    setError("Login failed.");
+  };
+
+  if (isOwner) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          onSignedOut();
+          signOut({ redirect: false });
+        }}
+        className="ml-1 inline-flex h-9 items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-sm font-medium text-[var(--accent)] transition hover:border-emerald-300"
+        aria-label="Sign out owner"
+        title="Sign out owner"
+      >
+        <CircleUserRound className="size-4" />
+        <span className="hidden sm:inline">{ownerName}</span>
+        <LogOut className="size-4" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="relative z-50 ml-1">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        disabled={isLoading}
+        className="inline-flex h-9 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-2 text-sm font-medium text-slate-700 transition hover:border-[var(--border-strong)] hover:text-slate-950 disabled:cursor-wait disabled:text-slate-400"
+        aria-label="Owner login"
+        title="Owner login"
+      >
+        {isLoading ? <Loader2 className="size-4 animate-spin" /> : <LockKeyhole className="size-4 text-slate-500" />}
+        <span className="hidden sm:inline">Owner</span>
+        <ChevronDown className="size-4 text-slate-500" />
+      </button>
+
+      {open && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-40 cursor-default"
+            aria-label="Close owner login"
+            onClick={() => setOpen(false)}
+          />
+          <form
+            onSubmit={submitLogin}
+            className="absolute right-0 top-11 z-50 w-[min(20rem,calc(100vw-2rem))] rounded-md border border-[var(--border)] bg-white p-3 text-left shadow-xl"
+          >
+            <div className="mb-3 flex items-center gap-2">
+              <KeyRound className="size-4 text-[var(--accent)]" />
+              <span className="text-sm font-semibold text-slate-950">Owner login</span>
+            </div>
+            <div className="space-y-2">
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                className="h-9 w-full rounded-md border border-[var(--border)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+                autoComplete="username"
+              />
+              <input
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="h-9 w-full rounded-md border border-[var(--border)] px-3 text-sm outline-none focus:border-[var(--accent)]"
+                type="password"
+                autoComplete="current-password"
+              />
+            </div>
+            {error && <p className="mt-2 text-xs font-medium text-[var(--danger)]">{error}</p>}
+            <button
+              type="submit"
+              disabled={submitting || !username.trim() || !password}
+              className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-3 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
+              Sign in
+            </button>
+          </form>
+        </>
+      )}
+    </div>
   );
 }
 
