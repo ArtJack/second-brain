@@ -59,11 +59,13 @@ def _safe_repo_path(relative: str) -> Path:
 def seed_collection(collection: str, relatives: list[str]) -> dict:
     files = chunks = 0
     print(f"\nSeeding {collection}")
-    for path in [_safe_repo_path(relative) for relative in relatives]:
-        for file_path, n_chunks in ingest_paths(path, collection=collection):
+    Store(collection=collection).reset()
+    for relative in relatives:
+        _safe_repo_path(relative)
+        for file_path, n_chunks in ingest_paths(Path(relative), collection=collection):
             files += 1
             chunks += n_chunks
-            print(f"  + {file_path.relative_to(REPO_ROOT)} ({n_chunks} chunks)")
+            print(f"  + {file_path} ({n_chunks} chunks)")
     total = Store(collection=collection).count()
     print(f"  total: {total} chunks")
     return {"collection": collection, "files": files, "chunks": chunks, "total": total}
@@ -73,6 +75,9 @@ def main() -> None:
     for relatives in CORPORA.values():
         for relative in relatives:
             _safe_repo_path(relative)
+    import os
+
+    os.chdir(REPO_ROOT)
     for collection, relatives in CORPORA.items():
         seed_collection(collection, relatives)
 
