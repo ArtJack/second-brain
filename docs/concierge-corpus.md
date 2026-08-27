@@ -62,25 +62,17 @@ techniques, edge-case validation, and release confidence.
 ### 4. Local Computer Repair — **Sacramento, CA area only**
 Honest, flat-rate diagnostics and repair for homes and small businesses.
 
-> **⚠️ UNRESOLVED — decide before the concierge goes live (flagged 2026-08-26).**
-> The prices below contradict the website's stated repair policy. The site
-> publishes **no** repair prices — every repair page says each job is quoted
-> individually, and CI actively enforces this: `NO_PRICE_PATHS` in
-> `scripts/seo-snapshot.mjs` fails the build if a dollar amount appears in the
-> text *or* the JSON-LD of `/repair` or any repair city page.
-> If the concierge quotes these figures it becomes the one public surface that
-> breaks that rule. Either drop this list and route repair questions to a quote,
-> or decide deliberately that the assistant may give ballpark repair pricing.
-> Left in place rather than deleted, because removing customer-facing prices is
-> a business call. Not urgent — `/lab/brain` is still a 404, so nothing is live.
-- Diagnostics — **$49** (credited toward the repair if you proceed)
-- Virus / malware cleanup — **$99**
-- Tune-up & speed cleanup — **$89**
-- OS reinstall + setup — **$120**
-- RAM / SSD upgrade — **$80 + parts**
-- New PC setup / data transfer — **$99**
-- Labor (hourly) — **$75/hr**
-- On-site visit (add-on) — **+$39**
+**No repair prices are published, and the assistant must not quote one.** Every
+repair job is quoted individually, with a fixed price agreed before work starts
+— this matches the website, where every repair page says the same and CI fails
+the build if a dollar amount appears on one. Route any "how much is X" repair
+question to a quote: take the problem and the visitor's email, and say Eugene
+follows up with a fixed price, usually within one business day.
+
+(A flat-rate list was briefly recorded here on 2026-08-26 and removed the same
+day — it contradicted the published policy above. If you ever decide the
+assistant may give ballpark repair pricing, that is a deliberate change to make
+on the website first, not here.)
 
 ### 5. Data, Databases & Integrations — starting at **$1,500 / project**
 Databases set up, migrated and connected; API and tool integrations; PDF and
