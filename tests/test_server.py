@@ -1,12 +1,35 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_web_env(monkeypatch):
+    # config.py runs load_dotenv() at import, so whatever SB_WEB_* the
+    # developer's real .env carries (the deployed demo sets REQUIRE_AUTH=1
+    # and a concierge collection) would leak into every test. Strip the lot
+    # back to defaults; tests that need a mode set it explicitly.
+    for name in (
+        "SB_WEB_REQUIRE_AUTH",
+        "SB_WEB_READ_TOKEN",
+        "SB_WEB_OWNER_TOKEN",
+        "SB_WEB_PUBLIC_COLLECTION",
+        "SB_WEB_NEUTRAL_COLLECTION",
+        "SB_WEB_SANDBOX_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    # Every TestClient request shares one client address, so the sliding
+    # window would trip across unrelated tests. 0 disables the limiter;
+    # the rate-limit tests set their own budget explicitly.
+    monkeypatch.setenv("SB_WEB_RATE_LIMIT_PER_MIN", "0")
 
 
 def _client():
     import secondbrain.server as server
 
     server._SESSIONS.clear()
+    server._rate_hits.clear()
     return TestClient(server.app), server
 
 
@@ -252,6 +275,57 @@ def test_require_auth_admits_service_read_token(monkeypatch):
         headers={"Authorization": "Bearer svc-token"},
     )
     assert response.status_code == 200
+
+
+def test_rate_limit_blocks_after_budget_and_exempts_health(monkeypatch):
+    client, server = _client()
+    monkeypatch.setenv("SB_WEB_RATE_LIMIT_PER_MIN", "3")
+
+    class FakeStore:
+        def __init__(self, collection=None):
+            self.collection = collection
+
+        def count(self):
+            return 3
+
+    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "embed", lambda texts: [[0.0]])
+
+    for _ in range(3):
+        assert client.get("/status", params={"corpus": "public"}).status_code == 200
+    over = client.get("/status", params={"corpus": "public"})
+    assert over.status_code == 429
+    assert over.headers["retry-after"] == "60"
+    # The pulse must survive a limited caller: the uptime monitor and the
+    # tunnel keep probing /health no matter what an abuser is doing.
+    assert client.get("/health").status_code == 200
+
+
+def test_rate_limit_keys_on_cf_connecting_ip(monkeypatch):
+    client, server = _client()
+    monkeypatch.setenv("SB_WEB_RATE_LIMIT_PER_MIN", "1")
+
+    class FakeStore:
+        def __init__(self, collection=None):
+            self.collection = collection
+
+        def count(self):
+            return 3
+
+    monkeypatch.setattr(server, "Store", FakeStore)
+
+    first = client.get(
+        "/status", params={"corpus": "public"}, headers={"CF-Connecting-IP": "203.0.113.7"}
+    )
+    blocked = client.get(
+        "/status", params={"corpus": "public"}, headers={"CF-Connecting-IP": "203.0.113.7"}
+    )
+    other = client.get(
+        "/status", params={"corpus": "public"}, headers={"CF-Connecting-IP": "203.0.113.8"}
+    )
+    assert first.status_code == 200
+    assert blocked.status_code == 429
+    assert other.status_code == 200
 
 
 def test_require_auth_off_keeps_anonymous_reads_working(monkeypatch):

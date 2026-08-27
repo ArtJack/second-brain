@@ -5,6 +5,8 @@ import json
 import os
 import secrets
 import tempfile
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -138,9 +140,54 @@ def _auth_from_header(header: str | None) -> AuthContext:
 # tunnel and the uptime monitor need a pulse, and OPTIONS is CORS preflight.
 _ANON_EXEMPT_PATHS = {"/health"}
 
+# Origin-side rate limit. This process is single-instance, so an in-memory
+# sliding window here is globally enforceable — unlike the Next proxy's
+# per-instance advisory counter. Keyed on CF-Connecting-IP because public
+# traffic only reaches this port through the Cloudflare tunnel; the header
+# is spoofable only from inside the tailnet, which is our own machines.
+_RATE_WINDOW_SECONDS = 60.0
+_rate_hits: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _rate_limited(request: Request) -> bool:
+    limit_raw = _env("SB_WEB_RATE_LIMIT_PER_MIN", "20")
+    try:
+        limit = int(limit_raw)
+    except ValueError:
+        limit = 20
+    if limit <= 0:  # 0 disables the limiter (tests, local dev)
+        return False
+    ip = request.headers.get("cf-connecting-ip") or (
+        request.client.host if request.client else "unknown"
+    )
+    now = time.monotonic()
+    hits = _rate_hits[ip]
+    while hits and now - hits[0] > _RATE_WINDOW_SECONDS:
+        hits.popleft()
+    if len(hits) >= limit:
+        return True
+    hits.append(now)
+    # Bound the table: drop idle IPs once the dict grows past any plausible
+    # legitimate audience, so a scan across source addresses can't grow it
+    # without bound.
+    if len(_rate_hits) > 10_000:
+        for key in [k for k, v in _rate_hits.items() if not v]:
+            del _rate_hits[key]
+    return False
+
 
 @app.middleware("http")
 async def bearer_auth_context(request: Request, call_next):
+    if (
+        request.method != "OPTIONS"
+        and request.url.path not in _ANON_EXEMPT_PATHS
+        and _rate_limited(request)
+    ):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "rate limited"},
+            headers={"retry-after": "60"},
+        )
     try:
         request.state.auth = _auth_from_header(request.headers.get("authorization"))
     except HTTPException as exc:
