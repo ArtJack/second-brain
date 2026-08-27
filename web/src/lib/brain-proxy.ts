@@ -267,6 +267,11 @@ export async function proxyBrain(request: NextRequest, path: string[], method: "
     method,
     headers: {
       Authorization: `Bearer ${token}`,
+      // The origin rate-limits per visitor, but through this proxy it only
+      // sees Vercel egress addresses — without this header every visitor
+      // would share one bucket. The origin trusts it solely from callers
+      // authenticated with the service token.
+      "X-Visitor-IP": clientIp(request),
       ...(bodyText ? { "Content-Type": "application/json" } : {}),
     },
     body: bodyText,

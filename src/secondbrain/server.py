@@ -157,7 +157,16 @@ def _rate_limited(request: Request) -> bool:
         limit = 20
     if limit <= 0:  # 0 disables the limiter (tests, local dev)
         return False
-    ip = request.headers.get("cf-connecting-ip") or (
+    # The Next proxy reaches us from a handful of Vercel egress addresses;
+    # keying on those would pool every visitor into one bucket. The proxy
+    # declares the real visitor in X-Visitor-IP, and only the service token
+    # earns trust in that declaration — an anonymous caller choosing its own
+    # key would be choosing an empty bucket.
+    ip = None
+    auth = getattr(request.state, "auth", None)
+    if auth is not None and auth.kind == "service_read":
+        ip = request.headers.get("x-visitor-ip")
+    ip = ip or request.headers.get("cf-connecting-ip") or (
         request.client.host if request.client else "unknown"
     )
     now = time.monotonic()
@@ -178,6 +187,11 @@ def _rate_limited(request: Request) -> bool:
 
 @app.middleware("http")
 async def bearer_auth_context(request: Request, call_next):
+    try:
+        request.state.auth = _auth_from_header(request.headers.get("authorization"))
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    # Auth first, then the limiter: the rate key depends on who is asking.
     if (
         request.method != "OPTIONS"
         and request.url.path not in _ANON_EXEMPT_PATHS
@@ -188,10 +202,6 @@ async def bearer_auth_context(request: Request, call_next):
             content={"detail": "rate limited"},
             headers={"retry-after": "60"},
         )
-    try:
-        request.state.auth = _auth_from_header(request.headers.get("authorization"))
-    except HTTPException as exc:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     # SB_WEB_REQUIRE_AUTH: refuse anonymous callers outright. The public
     # deployment exposes this port through a Cloudflare tunnel, and without
     # this gate anyone with curl could read the public corpora — and burn

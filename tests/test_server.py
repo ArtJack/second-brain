@@ -328,6 +328,47 @@ def test_rate_limit_keys_on_cf_connecting_ip(monkeypatch):
     assert other.status_code == 200
 
 
+def test_rate_limit_trusts_visitor_ip_only_from_service_token(monkeypatch):
+    client, server = _client()
+    monkeypatch.setenv("SB_WEB_RATE_LIMIT_PER_MIN", "1")
+    monkeypatch.setenv("SB_WEB_READ_TOKEN", "svc-token")
+
+    class FakeStore:
+        def __init__(self, collection=None):
+            self.collection = collection
+
+        def count(self):
+            return 3
+
+    monkeypatch.setattr(server, "Store", FakeStore)
+    svc = {"Authorization": "Bearer svc-token"}
+
+    # The proxy declares distinct visitors: each gets their own bucket.
+    a1 = client.get(
+        "/status", params={"corpus": "public"}, headers={**svc, "X-Visitor-IP": "198.51.100.1"}
+    )
+    a2 = client.get(
+        "/status", params={"corpus": "public"}, headers={**svc, "X-Visitor-IP": "198.51.100.1"}
+    )
+    b1 = client.get(
+        "/status", params={"corpus": "public"}, headers={**svc, "X-Visitor-IP": "198.51.100.2"}
+    )
+    assert a1.status_code == 200
+    assert a2.status_code == 429
+    assert b1.status_code == 200
+
+    # An anonymous caller does not get to pick its own bucket.
+    server._rate_hits.clear()
+    first = client.get(
+        "/status", params={"corpus": "public"}, headers={"X-Visitor-IP": "198.51.100.3"}
+    )
+    spoofed = client.get(
+        "/status", params={"corpus": "public"}, headers={"X-Visitor-IP": "198.51.100.4"}
+    )
+    assert first.status_code == 200
+    assert spoofed.status_code == 429
+
+
 def test_require_auth_off_keeps_anonymous_reads_working(monkeypatch):
     client, server = _client()
     monkeypatch.delenv("SB_WEB_REQUIRE_AUTH", raising=False)
