@@ -37,6 +37,7 @@ import { OwnerPanel } from "@/components/owner-panel";
 import fallbackJson from "@/data/demo-fallback.json";
 import type { BrainAnswer, BrainSource, BrainStatus, ChatMessage, Corpus, FallbackData, PublicCorpus } from "@/types/brain";
 import { TurnstileField } from "@/components/turnstile-field";
+import { withBase } from "@/lib/base-path";
 
 const fallback = fallbackJson as FallbackData;
 
@@ -168,8 +169,8 @@ type StatusSnapshot =
 async function readStatus(corpus: Corpus): Promise<StatusSnapshot> {
   try {
     const [healthResponse, statusResponse] = await Promise.all([
-      fetch("/api/brain/health", { cache: "no-store" }),
-      fetch(`/api/brain/status?corpus=${corpus}`, { cache: "no-store" }),
+      fetch(withBase("/api/brain/health"), { cache: "no-store" }),
+      fetch(withBase(`/api/brain/status?corpus=${corpus}`), { cache: "no-store" }),
     ]);
     if (!healthResponse.ok || !statusResponse.ok) throw new Error("offline");
     const statusJson = (await statusResponse.json()) as BrainStatus;
@@ -295,7 +296,7 @@ export function BrainApp() {
 
       const started = performance.now();
       try {
-        const recallResponse = await fetch("/api/brain/recall", {
+        const recallResponse = await fetch(withBase("/api/brain/recall"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -310,7 +311,7 @@ export function BrainApp() {
           setSelectedSource(0);
         }
 
-        const streamResponse = await fetch("/api/brain/ask/stream", {
+        const streamResponse = await fetch(withBase("/api/brain/ask/stream"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

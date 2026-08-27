@@ -75,7 +75,7 @@ class AddTaskRequest(BaseModel):
 
 @dataclass(frozen=True)
 class AuthContext:
-    kind: Literal["anonymous", "anon_session", "owner"]
+    kind: Literal["anonymous", "anon_session", "owner", "service_read"]
     session_id: str | None = None
 
     @property
@@ -125,6 +125,9 @@ def _auth_from_header(header: str | None) -> AuthContext:
     owner_token = _env("SB_WEB_OWNER_TOKEN")
     if owner_token and secrets.compare_digest(token, owner_token):
         return AuthContext("owner")
+    read_token = _env("SB_WEB_READ_TOKEN")
+    if read_token and secrets.compare_digest(token, read_token):
+        return AuthContext("service_read")
     session_id = _SESSIONS.get(token)
     if session_id:
         return AuthContext("anon_session", session_id=session_id)

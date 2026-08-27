@@ -118,6 +118,27 @@ def ask(
 
 
 @app.command()
+def see(
+    image: str = typer.Argument(..., help="Path to an image file, or an http(s) URL"),
+    question: str = typer.Argument(
+        "Describe this image in detail.", help="What to ask about the image"
+    ),
+):
+    """Look at an image and answer a question about it (local vision model)."""
+    from .llm import see as see_fn
+
+    if not image.startswith(("http://", "https://")) and not Path(image).expanduser().is_file():
+        console.print(f"[red]see failed:[/] no such image: {image}")
+        raise typer.Exit(1)
+    try:
+        result = see_fn(image, question)
+    except Exception as exc:  # noqa: BLE001 — surface any backend error cleanly
+        console.print(f"[red]see failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(Panel(result, title=f"vision: {image}"))
+
+
+@app.command()
 def recall(
     query: str = typer.Argument(..., help="Search query"),
     top_k: int = typer.Option(0, "--top-k", "--k", help="Chunks to retrieve (0 = configured default)"),
@@ -359,6 +380,7 @@ def status():
             f"backend : {cfg.base_url}\n"
             f"embed   : {cfg.embed_model}\n"
             f"chat    : {cfg.chat_model}\n"
+            f"vision  : {cfg.vision_model}\n"
             f"store   : {cfg.store_backend}\n"
             f"chroma  : {cfg.persist_dir}\n"
             f"qdrant  : {cfg.qdrant_url}\n"

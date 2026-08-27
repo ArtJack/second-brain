@@ -88,6 +88,66 @@ def test_owner_token_can_read_real_corpus(monkeypatch):
     assert captured["collection"] == server.cfg.collection
 
 
+def test_read_token_can_read_public_corpus(monkeypatch):
+    client, _server = _client()
+    captured = {}
+    monkeypatch.setenv("SB_WEB_READ_TOKEN", "read-secret")
+    monkeypatch.setattr(
+        _server,
+        "ask_fn",
+        lambda question, k=None, collection=None: captured.update(
+            question=question,
+            k=k,
+            collection=collection,
+        )
+        or {"answer": "A [1].", "sources": [], "invalid_citations": []},
+    )
+
+    resp = client.post(
+        "/ask",
+        json={"question": "public?", "k": 2, "corpus": "public"},
+        headers={"Authorization": "Bearer read-secret"},
+    )
+
+    assert resp.status_code == 200
+    assert captured == {"question": "public?", "k": 2, "collection": "second_brain_public"}
+
+
+def test_read_token_cannot_access_real_corpus(monkeypatch):
+    client, _server = _client()
+    monkeypatch.setenv("SB_WEB_READ_TOKEN", "read-secret")
+
+    resp = client.post(
+        "/ask",
+        json={"question": "private?", "corpus": "real"},
+        headers={"Authorization": "Bearer read-secret"},
+    )
+
+    assert resp.status_code == 403
+
+
+def test_read_token_cannot_access_tasks(monkeypatch):
+    client, _server = _client()
+    monkeypatch.setenv("SB_WEB_READ_TOKEN", "read-secret")
+
+    resp = client.get("/tasks", headers={"Authorization": "Bearer read-secret"})
+
+    assert resp.status_code == 403
+
+
+def test_garbage_bearer_token_is_unauthorized(monkeypatch):
+    client, _server = _client()
+    monkeypatch.setenv("SB_WEB_READ_TOKEN", "read-secret")
+
+    resp = client.post(
+        "/ask",
+        json={"question": "public?", "corpus": "public"},
+        headers={"Authorization": "Bearer nope"},
+    )
+
+    assert resp.status_code == 401
+
+
 def test_sandbox_routes_are_disabled_by_default(monkeypatch):
     client, _server = _client()
     monkeypatch.delenv("SB_WEB_SANDBOX_ENABLED", raising=False)

@@ -15,6 +15,8 @@ import {
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { withBase } from "@/lib/base-path";
+
 type OwnerTab = "ingest" | "learn" | "tasks" | "traces";
 type BusyState = OwnerTab | "complete" | null;
 
@@ -73,7 +75,7 @@ const tabs: Array<{ key: OwnerTab; label: string; icon: typeof FileUp }> = [
 ];
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
+  const response = await fetch(withBase(url), {
     cache: "no-store",
     ...init,
     headers: {
