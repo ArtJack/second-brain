@@ -189,7 +189,7 @@ async function readStatus(corpus: Corpus): Promise<StatusSnapshot> {
   }
 }
 
-export function BrainApp() {
+export function BrainApp({ ownerLoginEnabled = false }: { ownerLoginEnabled?: boolean }) {
   const { data: session, status: authStatus } = useSession();
   const isOwner = session?.user?.role === "owner";
   const [corpus, setCorpus] = useState<Corpus>("public");
@@ -421,6 +421,7 @@ export function BrainApp() {
           <AuthControl
             isLoading={authStatus === "loading"}
             isOwner={isOwner}
+            loginEnabled={ownerLoginEnabled}
             ownerName={session?.user?.name ?? "Owner"}
             onSignedOut={() => selectCorpus("public")}
           />
@@ -738,11 +739,13 @@ function IconButton({
 function AuthControl({
   isLoading,
   isOwner,
+  loginEnabled,
   onSignedOut,
   ownerName,
 }: {
   isLoading: boolean;
   isOwner: boolean;
+  loginEnabled: boolean;
   onSignedOut: () => void;
   ownerName: string;
 }) {
@@ -788,6 +791,10 @@ function AuthControl({
       </button>
     );
   }
+
+  // No owner credentials configured — the login form could never succeed,
+  // so the public deployment doesn't show the door at all.
+  if (!loginEnabled) return null;
 
   return (
     <div className="relative z-50 ml-1">
