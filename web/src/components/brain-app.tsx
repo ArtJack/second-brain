@@ -41,6 +41,8 @@ import { withBase } from "@/lib/base-path";
 
 const fallback = fallbackJson as FallbackData;
 
+const SESSION_MESSAGE_CAP = 15;
+
 const corpusMeta: Record<Corpus, { label: string; icon: LucideIcon; description: string }> = {
   public: {
     label: "Lab",
@@ -192,6 +194,9 @@ export function BrainApp() {
   const isOwner = session?.user?.role === "owner";
   const [corpus, setCorpus] = useState<Corpus>("public");
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialMessages("public"));
+  // Fifteen visitor questions per session. Enough to evaluate honestly, not
+  // enough to farm the GPU; the cap's replacement UI is a book-a-call CTA.
+  const userMessageCount = messages.filter((message) => message.role === "user").length;
   const [question, setQuestion] = useState("");
   const [selectedSource, setSelectedSource] = useState(0);
   const [isAsking, setIsAsking] = useState(false);
@@ -468,6 +473,24 @@ export function BrainApp() {
             ))}
           </div>
 
+          {userMessageCount >= SESSION_MESSAGE_CAP ? (
+            /* The cap doubles as the conversion moment: a visitor who asked
+               fifteen questions is not browsing, they are evaluating. */
+            <div className="mt-3 rounded-md border border-[var(--border)] bg-white p-4 text-center">
+              <p className="text-sm font-medium text-slate-900">
+                That&apos;s the demo limit — fifteen questions per visit.
+              </p>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                Want an agent like this over your own documents?
+              </p>
+              <a
+                href="https://artjeck.com/#contact"
+                className="mt-3 inline-flex h-10 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white shadow-sm transition hover:bg-[var(--accent-strong)]"
+              >
+                Start a project with ArtJeck
+              </a>
+            </div>
+          ) : (
           <form
             className="mt-3 rounded-md border border-[var(--border)] bg-white"
             onSubmit={(event) => {
@@ -478,9 +501,9 @@ export function BrainApp() {
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder={corpus === "real" ? "Ask your private brain..." : "Ask a question about the lab..."}
+              placeholder={corpus === "real" ? "Ask your private brain..." : "Ask about services, pricing, or how I build..."}
               className="min-h-24 w-full resize-none rounded-t-md border-0 bg-transparent px-3 py-3 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400"
-              maxLength={4000}
+              maxLength={2000}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -489,7 +512,7 @@ export function BrainApp() {
               }}
             />
             <div className="flex items-center justify-between border-t border-[var(--border)] px-3 py-2">
-              <span className="text-xs text-[var(--muted)]">{question.length} / 4000</span>
+              <span className="text-xs text-[var(--muted)]">{question.length} / 2000</span>
               <div className="flex items-center gap-2">
                 <IconButton label="Adjust retrieval" icon={Settings2} />
                 <button
@@ -504,6 +527,7 @@ export function BrainApp() {
               </div>
             </div>
           </form>
+          )}
 
           <div className="mt-3 rounded-md border border-[var(--border)] bg-white">
             <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">

@@ -215,3 +215,55 @@ def test_health_checks_store_and_embedding(monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["chunks"] == 4
     assert captured == {"collection": "second_brain_public", "embed_texts": ["health"]}
+
+
+def test_require_auth_blocks_anonymous_everywhere_but_health(monkeypatch):
+    client, server = _client()
+    monkeypatch.setenv("SB_WEB_REQUIRE_AUTH", "1")
+    monkeypatch.delenv("SB_WEB_OWNER_TOKEN", raising=False)
+
+    # Anonymous reads are refused outright — the tunnel makes this port
+    # world-reachable, so "anonymous" must mean "turned away", not "public".
+    assert client.post("/ask", json={"corpus": "public", "question": "hi"}).status_code == 401
+    assert client.post("/recall", json={"corpus": "public", "query": "hi"}).status_code == 401
+    assert client.get("/status", params={"corpus": "public"}).status_code == 401
+    # Session minting is anonymous by definition; in this mode nobody mints.
+    assert client.post("/session").status_code == 401
+    # The pulse stays reachable for the tunnel and the uptime monitor.
+    assert client.get("/health").status_code == 200
+
+
+def test_require_auth_admits_service_read_token(monkeypatch):
+    client, server = _client()
+    monkeypatch.setenv("SB_WEB_REQUIRE_AUTH", "1")
+    monkeypatch.setenv("SB_WEB_READ_TOKEN", "svc-token")
+
+    class FakeStore:
+        def __init__(self, collection=None):
+            self.collection = collection
+
+        def count(self):
+            return 3
+
+    monkeypatch.setattr(server, "Store", FakeStore)
+    response = client.get(
+        "/status",
+        params={"corpus": "public"},
+        headers={"Authorization": "Bearer svc-token"},
+    )
+    assert response.status_code == 200
+
+
+def test_require_auth_off_keeps_anonymous_reads_working(monkeypatch):
+    client, server = _client()
+    monkeypatch.delenv("SB_WEB_REQUIRE_AUTH", raising=False)
+
+    class FakeStore:
+        def __init__(self, collection=None):
+            self.collection = collection
+
+        def count(self):
+            return 3
+
+    monkeypatch.setattr(server, "Store", FakeStore)
+    assert client.get("/status", params={"corpus": "public"}).status_code == 200

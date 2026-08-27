@@ -1,99 +1,80 @@
 {
   "public": {
-    "label": "Lab",
+    "label": "ArtJeck",
     "prompts": [
-      "How does hybrid retrieval work?",
-      "How does reranking improve retrieval quality?",
-      "Show the flow for indexing new documents."
+      "What does a custom AI agent cost?",
+      "How does a project with ArtJeck actually run?",
+      "Do you repair computers, and where?"
     ],
     "answers": {
-      "How does hybrid retrieval work?": {
-        "answer": "Hybrid retrieval combines dense vector search with a small keyword retriever so exact section names and paraphrased questions can both land on useful evidence. The retrieved sets are merged, adjacent chunks can be pulled in for continuity, and the answer still has to cite the numbered context [1][2].",
-        "latencyMs": 812,
-        "model": "local model",
+      "What does a custom AI agent cost?": {
+        "answer": "AI automation engineering starts at $8,000 per project for a RAG system or AI agent build, shipped production-ready with evaluations and edge-case testing [1]. Smaller engagements exist: a single-workflow automation typically starts around $2,500, and an AI feature with a full evaluation and QA harness from $12,000. Advisory time is $150/hr [1]. Every price is a starting point — the final number is a fixed quote agreed after a short scoping conversation, before any work begins [2].",
+        "latencyMs": 640,
+        "model": "recorded answer",
         "sources": [
           {
             "n": 1,
-            "source": "docs/design.md",
+            "source": "docs/concierge-corpus.md",
             "type": "Markdown",
-            "distance": 0.22,
-            "retrieval": "keyword",
-            "text": "### Hybrid Retrieval\n\nThe system combines sparse keyword matching and dense semantic retrieval. Keyword search rescues exact section/list lookups, while vector search handles paraphrased questions. Results are merged before the answer is generated from numbered context."
+            "distance": 0.14,
+            "retrieval": "semantic",
+            "text": "### 1. AI Automation Engineering — starting at **$8,000 / project**\nAI agents, RAG systems, prompt engineering, workflow automation, model evaluations, fine-tuning, and business-process automation — shipped production-ready with evals and edge-case testing.\n- Single-workflow automation — typically from **$2,500**\n- RAG system / AI agent build — typically from **$8,000**\n- AI feature + evaluation & QA harness — typically from **$12,000**\n- Advisory / consulting — **$150/hr**"
           },
           {
             "n": 2,
-            "source": "README.md",
+            "source": "docs/concierge-corpus.md",
             "type": "Markdown",
-            "distance": 0.243,
-            "retrieval": "vector",
-            "text": "second-brain is a local-first RAG assistant. It ingests notes, docs, and code, retrieves relevant chunks, and answers with inline citations so claims can be traced back to source files."
-          },
-          {
-            "n": 3,
-            "source": "docs/EVALUATION.md",
-            "type": "Markdown",
-            "distance": 0.321,
-            "retrieval": "vector",
-            "text": "The eval harness measures retrieval hit-rate, source recall, grounded-answer checks, and abstention behavior over a synthetic regression corpus."
-          },
-          {
-            "n": 4,
-            "source": "docs/MCP.md",
-            "type": "Markdown",
-            "distance": 0.365,
-            "retrieval": "keyword-adjacent",
-            "text": "The MCP server exposes ask and recall as read-only tools, while ingest, learn, and task mutations are marked as write operations."
+            "distance": 0.21,
+            "retrieval": "keyword",
+            "text": "All project prices are **starting points**; final quotes follow a short scoping conversation. The six anchors below match the website's service cards."
           }
-        ],
-        "invalid_citations": []
+        ]
       },
-      "How does reranking improve retrieval quality?": {
-        "answer": "The current public demo focuses on retrieval fusion rather than a separate reranker. The important quality control is that every answer is checked against numbered retrieved chunks, and retrieval quality is measured through source recall and grounded-answer evaluations [1][2].",
-        "latencyMs": 744,
-        "model": "local model",
+      "How does a project with ArtJeck actually run?": {
+        "answer": "You work with one independent engineer end to end — the person who scopes the work is the person who builds and tests it [1]. A project starts with a short scoping conversation that ends in a fixed quote; the build itself carries a software-quality background into AI work, so evaluations and edge-case testing are part of the engineering rather than an afterthought [1]. The code you pay for is yours outright — no platform lock-in, no monthly fees holding the work hostage [2].",
+        "latencyMs": 598,
+        "model": "recorded answer",
         "sources": [
           {
             "n": 1,
-            "source": "docs/EVALUATION.md",
+            "source": "docs/concierge-corpus.md",
             "type": "Markdown",
-            "distance": 0.277,
-            "retrieval": "vector",
-            "text": "Evaluation reports include retrieval pass/fail, first relevant rank, source recall, MRR, and grounded-answer rubric checks."
+            "distance": 0.16,
+            "retrieval": "semantic",
+            "text": "ArtJeck Technology is the studio practice of one independent AI engineer in Sacramento, California. The differentiator is a software-quality (SDLC/STLC) background applied to AI: testing and evals are part of the build, not an afterthought. No account managers, no juniors, no handoffs."
           },
           {
             "n": 2,
-            "source": "docs/design.md",
+            "source": "docs/concierge-corpus.md",
             "type": "Markdown",
-            "distance": 0.304,
+            "distance": 0.24,
             "retrieval": "keyword",
-            "text": "Retrieval is treated as an auditable path: store count, embedding, retrieval, and generation are recorded as spans when tracing is enabled."
+            "text": "Clients own the code outright. Fixed quotes are agreed before work starts; pricing is published on the site."
           }
-        ],
-        "invalid_citations": []
+        ]
       },
-      "Show the flow for indexing new documents.": {
-        "answer": "Indexing reads supported files, chunks text with overlap, embeds the chunks, deletes stale chunks for the same source, and upserts the fresh chunks into the selected collection [1][2].",
-        "latencyMs": 693,
-        "model": "local model",
+      "Do you repair computers, and where?": {
+        "answer": "Yes — local computer repair for homes and small businesses, in the Sacramento, CA area only [1]. That covers diagnostics, virus and malware removal, SSD and memory upgrades, setup and data transfer, backups, and Wi-Fi or printer trouble — on-site across Sacramento and nearby cities, or remote when a screen share is faster. Repair work is quoted per job: you get a fixed price for the fix before the repair starts, and no repair prices are published [1]. If you're outside the Sacramento region, repair isn't offered — but the software and AI services are remote-friendly [2].",
+        "latencyMs": 571,
+        "model": "recorded answer",
         "sources": [
           {
             "n": 1,
-            "source": "README.md",
+            "source": "docs/concierge-corpus.md",
             "type": "Markdown",
-            "distance": 0.238,
-            "retrieval": "vector",
-            "text": "Run `sb ingest <path>` to discover files, chunk their text, embed the chunks, and store them for cited retrieval."
+            "distance": 0.13,
+            "retrieval": "semantic",
+            "text": "### 4. Local Computer Repair — **Sacramento, CA area only**\nDiagnostics, virus removal, SSD/RAM upgrades, setup and data transfer, backups, Wi-Fi and printers — on-site or remote. Every job is quoted individually with a fixed price agreed before the repair starts; no repair prices are published."
           },
           {
             "n": 2,
-            "source": "docs/design.md",
+            "source": "docs/concierge-corpus.md",
             "type": "Markdown",
-            "distance": 0.292,
+            "distance": 0.27,
             "retrieval": "keyword",
-            "text": "Ingestion uses a simple robust character window with overlap, then writes chunk metadata including source path, filename, and chunk index."
+            "text": "Location: Sacramento, CA — serving Sacramento, San Francisco, and the SF Bay Area; remote-friendly for software and AI work."
           }
-        ],
-        "invalid_citations": []
+        ]
       }
     }
   },

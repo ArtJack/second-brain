@@ -4,6 +4,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
 const RATE_LIMIT_MAX = 36;
+// The routes that spend GPU time get a much tighter budget than the cheap
+// health/status polls. Per-instance and therefore advisory on Vercel — the
+// enforceable backstop is the Cloudflare rate rule in front of brain-api —
+// but it still stops a casual loop from a single warm instance.
+const ASK_RATE_LIMIT_MAX = 6;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const MAX_TEXT_LENGTH = 4000;
 const MAX_INGEST_LENGTH = 100_000;
@@ -30,7 +35,8 @@ function isRateLimited(ip: string, route: string): boolean {
   const now = Date.now();
   const cutoff = now - RATE_LIMIT_WINDOW_MS;
   const recent = (recentRequests.get(key) ?? []).filter((time) => time > cutoff);
-  if (recent.length >= RATE_LIMIT_MAX) {
+  const limit = route.startsWith("ask") ? ASK_RATE_LIMIT_MAX : RATE_LIMIT_MAX;
+  if (recent.length >= limit) {
     recentRequests.set(key, recent);
     return true;
   }

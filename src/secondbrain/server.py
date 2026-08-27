@@ -134,12 +134,31 @@ def _auth_from_header(header: str | None) -> AuthContext:
     raise HTTPException(status_code=401, detail="unauthorized")
 
 
+# Paths an unauthenticated caller may reach even in locked-down mode: the
+# tunnel and the uptime monitor need a pulse, and OPTIONS is CORS preflight.
+_ANON_EXEMPT_PATHS = {"/health"}
+
+
 @app.middleware("http")
 async def bearer_auth_context(request: Request, call_next):
     try:
         request.state.auth = _auth_from_header(request.headers.get("authorization"))
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    # SB_WEB_REQUIRE_AUTH: refuse anonymous callers outright. The public
+    # deployment exposes this port through a Cloudflare tunnel, and without
+    # this gate anyone with curl could read the public corpora — and burn
+    # GPU time — while skipping the site's Turnstile and rate limits. The
+    # Next proxy authenticates with SB_WEB_READ_TOKEN, so real visitors are
+    # never anonymous by the time they reach here. Blocking POST /session
+    # for anons is deliberate: in this mode sessions are minted by nobody.
+    if (
+        _enabled("SB_WEB_REQUIRE_AUTH")
+        and request.state.auth.kind == "anonymous"
+        and request.method != "OPTIONS"
+        and request.url.path not in _ANON_EXEMPT_PATHS
+    ):
+        return JSONResponse(status_code=401, content={"detail": "unauthorized"})
     return await call_next(request)
 
 
