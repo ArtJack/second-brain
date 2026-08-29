@@ -243,7 +243,12 @@ export async function proxyBrain(request: NextRequest, path: string[], method: "
         bodyText = JSON.stringify(bodyResult.body);
       }
     } else {
-      if (!isOwner) {
+      // Turnstile tokens are single-use, and every question fans out into
+      // recall + ask. Verifying both burned the token on the first call and
+      // 403'd the second — invisible under the always-pass test keys, fatal
+      // under real ones. So the token is spent only on the GPU-expensive
+      // ask routes; recall stays behind the proxy and origin rate limits.
+      if (!isOwner && (endpoint === "ask" || endpoint === "ask/stream")) {
         const turnstile = await verifyTurnstile(request);
         if (!turnstile.ok) {
           return NextResponse.json({ error: turnstile.message }, { status: turnstile.status });

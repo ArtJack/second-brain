@@ -23,9 +23,12 @@ declare global {
 type TurnstileFieldProps = {
   onToken: (token: string) => void;
   onExpire: () => void;
+  /** Receives a handle whose reset() invalidates the widget for a fresh
+   *  token — tokens are single-use, so the app must reset after each ask. */
+  onWidget?: (handle: { reset: () => void }) => void;
 };
 
-export function TurnstileField({ onToken, onExpire }: TurnstileFieldProps) {
+export function TurnstileField({ onToken, onExpire, onWidget }: TurnstileFieldProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const widgetId = useRef<string | null>(null);
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
@@ -41,6 +44,11 @@ export function TurnstileField({ onToken, onExpire }: TurnstileFieldProps) {
         "expired-callback": onExpire,
         theme: "light",
         size: "flexible",
+      });
+      onWidget?.({
+        reset: () => {
+          if (widgetId.current) window.turnstile?.reset(widgetId.current);
+        },
       });
     };
 

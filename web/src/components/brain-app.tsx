@@ -203,6 +203,9 @@ export function BrainApp({ ownerLoginEnabled = false }: { ownerLoginEnabled?: bo
   const [health, setHealth] = useState<"checking" | "online" | "offline">("checking");
   const [status, setStatus] = useState<BrainStatus | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
+  // Tokens are single-use: after every ask the widget must be reset so the
+  // next question carries a fresh token. The handle comes from TurnstileField.
+  const turnstileWidget = useRef<{ reset: () => void } | null>(null);
   const [lastUpdated, setLastUpdated] = useState("10:31 AM");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -382,6 +385,10 @@ export function BrainApp({ ownerLoginEnabled = false }: { ownerLoginEnabled?: bo
         applyFallbackAnswer(text, assistantId);
       } finally {
         setIsAsking(false);
+        // The token was spent on this ask (siteverify consumes it even on
+        // failure) — invalidate and let the widget mint a fresh one.
+        setTurnstileToken("");
+        turnstileWidget.current?.reset();
       }
     },
     [applyFallbackAnswer, corpus, health, isAsking, question, status?.chat_model, turnstileToken],
@@ -550,7 +557,7 @@ export function BrainApp({ ownerLoginEnabled = false }: { ownerLoginEnabled?: bo
             </div>
           </div>
 
-          {isOwner ? <OwnerPanel onMutation={refreshStatus} /> : <TurnstileField onToken={setTurnstileToken} onExpire={() => setTurnstileToken("")} />}
+          {isOwner ? <OwnerPanel onMutation={refreshStatus} /> : <TurnstileField onToken={setTurnstileToken} onExpire={() => setTurnstileToken("")} onWidget={(handle) => { turnstileWidget.current = handle; }} />}
         </section>
 
         <section className="bg-[var(--surface)] p-4 lg:p-5">
