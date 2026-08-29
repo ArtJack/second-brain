@@ -321,6 +321,11 @@ def _context_for_stream(question: str, k: int | None, collection: str) -> dict:
                 "source": meta.get("source", "?"),
                 "distance": hit["distance"],
                 "retrieval": hit.get("retrieval", "vector"),
+                # The chunk text rides along so the client's citation panel
+                # can show what [n] actually cites. Without it the stream's
+                # sources overwrite the recall-populated ones and the panel
+                # degrades to "source text unavailable".
+                "text": hit["document"],
             }
         )
     return {"empty": False, "context": "\n\n".join(context_parts), "sources": sources}
