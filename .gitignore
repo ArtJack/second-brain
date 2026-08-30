@@ -17,3 +17,9 @@ web/node_modules/
 
 # OS
 .DS_Store
+
+# Service logs (sb-web-api under launchd) — may echo request details
+logs/
+# Internal deployment planning — superseded by the shipped implementation,
+# and deliberately not published (it maps the lab that serves the demo).
+docs/web-ui-scope.md

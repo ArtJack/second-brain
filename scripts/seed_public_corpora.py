@@ -20,10 +20,12 @@ CORPORA: dict[str, list[str]] = {
         "docs/requirements.md",
         "docs/MCP.md",
         "docs/EVALUATION.md",
-        # docs/web-ui-scope.md is deliberately NOT here: it describes the
-        # deployment's own topology — tunnel hostnames, ports, service layout.
-        # A visitor asking "what's your infrastructure?" was getting a cited
-        # tour of it. The corpus a demo serves must never document the demo.
+        # The deployment-planning note (docs/web-ui-scope.md, gitignored and
+        # local-only) is deliberately absent, and so is anything like it: it
+        # describes the deployment's own topology — tunnel hostnames, ports,
+        # service layout. A visitor asking "what's your infrastructure?" was
+        # getting a cited tour of it. The corpus a demo serves must never
+        # document the demo.
     ],
     # The corpus the public artjeck.com demo actually serves
     # (SB_WEB_PUBLIC_COLLECTION=second_brain_concierge): sales-oriented,

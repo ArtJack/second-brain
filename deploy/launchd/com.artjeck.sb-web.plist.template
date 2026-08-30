@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. Copy to ~/Library/LaunchAgents/com.artjeck.sb-web.plist, replace
+  the two placeholders, then:
+
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.artjeck.sb-web.plist
+
+  __REPO__  absolute path to this repository on the serving host
+  __BIND__  address sb-web-api listens on
+
+  Choosing __BIND__: bind to a private interface, never 0.0.0.0. If a tunnel
+  connector runs on this same host, 127.0.0.1 is right. If the connector runs
+  elsewhere and reaches this host over a private overlay network, bind to this
+  host's address on that network — the port then answers only to peers already
+  inside it. Either way the app-side gate (SB_WEB_REQUIRE_AUTH=1) is what
+  actually refuses anonymous callers; the bind is defence in depth, not the
+  defence.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.artjeck.sb-web</string>
+
+  <!-- All configuration and secrets come from the repo's gitignored .env,
+       loaded by config.py's load_dotenv() relative to WorkingDirectory.
+       Owner-auth variables (SB_WEB_OWNER_TOKEN) are deliberately absent:
+       the public deployment must not carry an owner path. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/.venv/bin/sb-web-api</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- Process env wins over .env, because load_dotenv() does not override.
+         The bind therefore lives with the deployment unit rather than with
+         the secrets. -->
+    <key>SB_WEB_HOST</key>
+    <string>__BIND__</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>__REPO__/logs/web.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__REPO__/logs/web.err.log</string>
+</dict>
+</plist>
