@@ -8,14 +8,14 @@
       "id": "lab-code-route",
       "query": "Where does the code alias run?",
       "expected_sources": ["evals/corpus/ai-lab-routing.md"],
-      "expected_answer_contains": ["M4 Mac mini"],
+      "expected_answer_contains": ["workstation-01"],
       "tags": ["routing", "rubric-smoke"]
     },
     {
       "id": "lab-chat-route",
       "query": "Which machine handles the local chat alias?",
       "expected_sources": ["evals/corpus/ai-lab-routing.md"],
-      "expected_answer_contains": ["Alienware", "GTX 1070"],
+      "expected_answer_contains": ["gpu-01", "llama3.1"],
       "tags": ["routing"]
     },
     {
@@ -29,7 +29,7 @@
       "id": "lab-paid-cap",
       "query": "What spending cap applies to the Claude fallback?",
       "expected_sources": ["evals/corpus/ai-lab-routing.md"],
-      "expected_answer_contains": ["$50", "30-day"],
+      "expected_answer_contains": ["$25", "30-day"],
       "tags": ["routing"]
     },
     {
@@ -50,7 +50,7 @@
       "id": "brain-vector-store",
       "query": "Where do the heavy embedding vectors live?",
       "expected_sources": ["evals/corpus/second-brain-operations.md"],
-      "expected_answer_contains": ["Qdrant", "Alienware"],
+      "expected_answer_contains": ["Qdrant", "gpu-01"],
       "tags": ["memory"]
     },
     {

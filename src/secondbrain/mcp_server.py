@@ -1,7 +1,7 @@
 """MCP server for second-brain.
 
 Exposes the second-brain RAG engine as Model Context Protocol tools so any MCP
-client (Claude Code, Claude Desktop, a native iPad/MacBook client) can query and
+client (Claude Code, Claude Desktop, a native mobile or desktop client) can query and
 teach your brain.
 
 It reuses the existing engine — same `cfg`, same LiteLLM-gateway routing, same

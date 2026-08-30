@@ -6,7 +6,7 @@
       "id": "model-routing-code",
       "query": "Where is the code model routed?",
       "expected_sources": ["examples/lab-notes.md"],
-      "expected_answer_contains": ["M4 Mac mini"],
+      "expected_answer_contains": ["workstation-01"],
       "tags": ["routing"]
     },
     {
@@ -20,7 +20,7 @@
       "id": "claude-budget",
       "query": "What budget cap applies to the paid Claude route?",
       "expected_sources": ["examples/lab-notes.md"],
-      "expected_answer_contains": ["$50", "30-day"],
+      "expected_answer_contains": ["$25", "30-day"],
       "tags": ["gateway", "budget"]
     },
     {

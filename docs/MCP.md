@@ -1,8 +1,8 @@
 # second-brain over MCP — cross-device guide
 
 This exposes your second brain as an **MCP server** so any MCP client can query and teach
-it: Claude Code / Claude Desktop on the Mac mini, the same over SSH from the iPad Air, and
-native MCP clients on the iPad / MacBook Pro over Tailscale.
+it: Claude Code / Claude Desktop on the host that runs it, the same over SSH from a tablet
+or second laptop, and native MCP clients on those devices over Tailscale.
 
 It reuses the existing engine (same `.env`, same LiteLLM-gateway routing, same Qdrant/Chroma
 store), so it answers from the **free local models** by default — no extra cost. The only
@@ -37,7 +37,7 @@ Selected by `SB_MCP_TRANSPORT`:
 | `SB_MCP_TOKEN` | _(unset)_ | If set, clients must send `Authorization: Bearer <token>`. Keep it in the git-ignored `.env`. |
 | `SB_MCP_ALLOWED_HOSTS` | _(bind host + localhost)_ | Comma-separated extra `Host` headers to accept (e.g. a Tailscale MagicDNS name). DNS-rebinding protection stays on; the bind host and localhost are always allowed. |
 
-## 1. Mac mini — Claude Code (stdio)
+## 1. The host machine — Claude Code (stdio)
 
 Already wired: the repo ships a project-scoped `.mcp.json`. Just run Claude Code in the repo:
 
@@ -51,13 +51,13 @@ Then ask it things like *"use second-brain recall to find what I decided about g
 This config is **project-scoped** — it does not touch your global Claude config or the
 `local-agent-lab` environment.
 
-## 2. iPad Air M2 — over SSH (stdio, zero new software)
+## 2. A tablet or second laptop — over SSH (stdio, zero new software)
 
-You already SSH into the Mac mini over Tailscale. From that session, run Claude Code exactly
-as above — the MCP server runs on the mini, the iPad is just the terminal:
+If you already SSH into the host over Tailscale, run Claude Code from that session exactly
+as above — the MCP server runs on the host, the other device is just the terminal:
 
 ```bash
-ssh <mac-mini-over-tailscale>
+ssh <host-over-tailscale>
 cd ~/Projects/AI/projects/second-brain && claude
 ```
 
@@ -70,15 +70,15 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "second-brain": {
       "command": "uv",
-      "args": ["run", "--directory", "/Users/artjack/Projects/AI/projects/second-brain", "sb-mcp"]
+      "args": ["run", "--directory", "/path/to/second-brain", "sb-mcp"]
     }
   }
 }
 ```
 
-## 4. iPad / MacBook Pro — native MCP client over Tailscale (HTTP)
+## 4. Other devices — native MCP client over Tailscale (HTTP)
 
-Run the HTTP service on the mini (see §5 for 24/7), then point any Streamable-HTTP MCP
+Run the HTTP service on the host (see §5 for 24/7), then point any Streamable-HTTP MCP
 client at it:
 
 ```
@@ -89,9 +89,9 @@ Header: Authorization: Bearer <SB_MCP_TOKEN>
 Because it listens on the **Tailscale** address and requires a token, it is reachable from
 your devices anywhere but not from the public internet.
 
-## 5. Run it 24/7 on the Mac mini (launchd)
+## 5. Run it 24/7 on the host (macOS launchd)
 
-The mini is always on, so run the HTTP service as a LaunchAgent:
+If the host is always on, run the HTTP service as a LaunchAgent:
 
 ```bash
 ./deploy/install-mcp-service.sh      # generates a token into .env, installs + starts the agent

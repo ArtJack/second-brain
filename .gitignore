@@ -23,3 +23,13 @@ logs/
 # Internal deployment planning — superseded by the shipped implementation,
 # and deliberately not published (it maps the lab that serves the demo).
 docs/web-ui-scope.md
+
+# Agent working files and internal planning notes. These describe the lab and
+# the deployment, which is exactly what this public repo must not carry — the
+# same rule that keeps the deployment note out of the demo's corpus.
+.claude/
+.codex/
+AGENTS.md
+CLAUDE.md
+CODEX_*.md
+HANDOFF_REPORT.md

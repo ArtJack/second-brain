@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the second-brain MCP HTTP server as an always-on LaunchAgent on the Mac mini.
+# Install the second-brain MCP HTTP server as an always-on LaunchAgent (macOS).
 # Binds to the Tailscale IP (reachable from your other devices) with bearer-token auth.
 set -euo pipefail
 

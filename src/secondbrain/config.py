@@ -1,6 +1,6 @@
 """Central configuration, loaded from .env.
 
-Defaults point at the GTX Ollama directly (free, no key). Switch OPENAI_BASE_URL +
+Defaults point at a local Ollama directly (free, no key). Switch OPENAI_BASE_URL +
 models to the LiteLLM gateway (.env.gateway.example) for the Claude-quality path —
 the rest of the code doesn't change, because both speak the OpenAI API.
 """

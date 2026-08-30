@@ -25,7 +25,7 @@ sb eval-intake               # build a private 100-question benchmark in the ter
 ## Why it's built this way (the interesting decisions)
 
 - **OpenAI-compatible everywhere.** `llm.py` talks to one OpenAI-style endpoint. Default is
-  the GTX Ollama directly (free, no key, both models warm). Switch to `.env.gateway` and the
+  a local Ollama directly (free, no key, both models warm). Switch to `.env.gateway` and the
   *same code* routes through the LiteLLM gateway — free local embeddings + Claude for the
   answer, with a budget cap. Develop for free, ship with quality, zero code change.
 - **Citations are mandatory.** The system prompt forces the model to answer *only* from
@@ -74,7 +74,7 @@ question ──▶ LangGraph ──ask──▶ Store.query ──top-k──▶
 
 ## MCP server
 
-Expose the brain to any MCP client (Claude Code, Claude Desktop, a native iPad/MacBook
+Expose the brain to any MCP client (Claude Code, Claude Desktop, a native mobile or desktop
 client) so an agent can query and teach it directly. It reuses this engine, so it inherits
 the free-local-model gateway defaults — **no extra cost**. Full guide: **[docs/MCP.md](docs/MCP.md)**.
 
@@ -87,7 +87,7 @@ SB_MCP_TOKEN=$(openssl rand -hex 24) uv run sb-mcp   # Streamable HTTP, token-pr
 
 Tools: `ask` (cited answer), `recall` (raw chunks, no model call), `ingest`, `learn`,
 `list_tasks`, `add_task`, `complete_task`, `status`. Claude Code auto-loads the stdio
-server from the repo's `.mcp.json` — just run `claude` here (works over SSH from the iPad).
+server from the repo's `.mcp.json` — just run `claude` here (works over SSH too).
 Inspect interactively with `npx @modelcontextprotocol/inspector`.
 
 ## Config
@@ -105,37 +105,38 @@ SB_MEMORY_DIR=./data/memory
 SB_STATE_DB=./data/artjeck.sqlite3
 ```
 
-### Qdrant on the AI Lab
+### Qdrant
 
 ```bash
 SB_STORE=qdrant
 QDRANT_URL=http://127.0.0.1:6333
-QDRANT_API_KEY=<from /opt/ai-lab/.env on the Alienware>
+QDRANT_API_KEY=<your Qdrant API key>
 ```
 
 After switching stores, ingest again because Chroma and Qdrant keep separate collections.
 
 ## Storage Policy
 
-On ArtJack's machines, the Mac Mini should stay light:
+Split by cost, so the machine you sit at stays light:
 
-- Mac Mini keeps the Artjeck code and small SQLite state DB.
-- Shared Disk E keeps learned Markdown memories, large source files, exports, and backups.
-- Alienware Qdrant should hold the heavy vector index once `QDRANT_API_KEY` is configured.
+- The host you run the CLI on keeps the code and the small SQLite state DB.
+- A larger volume keeps learned Markdown memories, big source files, exports, and backups.
+- Qdrant holds the heavy vector index once `QDRANT_API_KEY` is configured — on a GPU host
+  if you have one, since that is usually where the embedding model already lives.
 
-Current recommended local `.env` shape:
+An `.env` shape that follows it (adjust the paths to your own volume):
 
 ```bash
-SB_MEMORY_DIR=/Volumes/DISK/AI/artjeck/memory
+SB_MEMORY_DIR=/path/to/volume/memory
 SB_STATE_DB=./data/artjeck.sqlite3
 QDRANT_URL=http://127.0.0.1:6333
 ```
 
-Put large documents under `/Volumes/DISK/AI/artjeck/inbox`, then ingest from there:
+Put large documents under that volume's inbox, then ingest from there:
 
 ```bash
 artjeck
-/ingest /Volumes/DISK/AI/artjeck/inbox
+/ingest /path/to/volume/inbox
 ```
 
 ## Learning
@@ -179,9 +180,9 @@ uv run sb overnight
 ```
 
 The first run creates `data/overnight/config.json`. Edit `targets` there to point at your
-real inboxes or synced Alienware folders. Reports land in `data/overnight/reports/`.
+real inboxes or synced network folders. Reports land in `data/overnight/reports/`.
 
-To schedule it daily on the Mac Mini:
+To schedule it daily (macOS, launchd):
 
 ```bash
 chmod +x deploy/install-overnight-service.sh
