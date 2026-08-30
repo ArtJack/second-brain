@@ -47,9 +47,9 @@ def write_memory(text: str, source: str = "user") -> Path:
     return path
 
 
-def learn(text: str, source: str = "user") -> dict:
+def learn(text: str, source: str = "user", collection: str | None = None) -> dict:
     path = write_memory(text, source=source)
     chunks = 0
-    for _, n in ingest_paths(path):
+    for _, n in ingest_paths(path, collection=collection):
         chunks += n
     return {"path": path, "chunks": chunks}

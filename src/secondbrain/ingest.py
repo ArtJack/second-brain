@@ -64,9 +64,9 @@ def discover(root: str | Path) -> list[Path]:
     return files
 
 
-def ingest_paths(path: str | Path, reset: bool = False) -> Iterator[tuple[Path, int]]:
+def ingest_paths(path: str | Path, reset: bool = False, collection: str | None = None) -> Iterator[tuple[Path, int]]:
     """Yield (file, n_chunks) as each file is ingested, for live progress."""
-    store = Store()
+    store = Store(collection=collection)
     if reset:
         store.reset()
     for f in discover(path):

@@ -12,6 +12,7 @@ from rich.table import Table
 
 from .agent import run_turn
 from .ask import ask as ask_fn
+from .ask import recall as recall_fn
 from .browser_check import DEFAULT_BROWSER_DIR, capture_url
 from .config import cfg
 from .evals import DEFAULT_BENCHMARK, load_benchmark, resolve_corpus_paths, run_benchmark, select_cases
@@ -32,6 +33,20 @@ console = Console()
 
 
 AGENT_NAME = "Artjeck"
+_COLLECTION: str | None = None
+
+
+@app.callback()
+def main_options(
+    collection: str | None = typer.Option(
+        None,
+        "--collection",
+        help="Override the vector collection for ask/recall/ingest/learn/status.",
+    ),
+) -> None:
+    """Shared CLI options."""
+    global _COLLECTION
+    _COLLECTION = collection
 
 
 def _percent(value: float | None) -> str:
@@ -56,13 +71,14 @@ def _print_answer(res: dict, show_distance: bool = True, show_sources: bool = Tr
         console.print(f"  [yellow]⚠ ungrounded citation(s) {refs}: no matching source — answer may be unreliable[/]")
 
 
-def _ingest_path(path: str, reset: bool = False) -> dict:
+def _ingest_path(path: str, reset: bool = False, collection: str | None = None) -> dict:
     files = chunks = 0
-    for f, n in ingest_paths(path, reset=reset):
+    selected_collection = collection if collection is not None else _COLLECTION
+    for f, n in ingest_paths(path, reset=reset, collection=selected_collection):
         files += 1
         chunks += n
         console.print(f"  [green]+[/] {f} [dim]({n} chunks)[/]")
-    return {"files": files, "chunks": chunks, "total": Store().count()}
+    return {"files": files, "chunks": chunks, "total": Store(collection=selected_collection).count()}
 
 
 @app.command()
@@ -94,11 +110,52 @@ def ask(
 ):
     """Ask a question and get an answer cited to your sources."""
     try:
-        res = ask_fn(question, k=k)
+        res = ask_fn(question, k=k, collection=_COLLECTION)
     except RuntimeError as exc:
         console.print(f"[red]ask failed:[/] {exc}")
         raise typer.Exit(1) from exc
     _print_answer(res)
+
+
+@app.command()
+def see(
+    image: str = typer.Argument(..., help="Path to an image file, or an http(s) URL"),
+    question: str = typer.Argument(
+        "Describe this image in detail.", help="What to ask about the image"
+    ),
+):
+    """Look at an image and answer a question about it (local vision model)."""
+    from .llm import see as see_fn
+
+    if not image.startswith(("http://", "https://")) and not Path(image).expanduser().is_file():
+        console.print(f"[red]see failed:[/] no such image: {image}")
+        raise typer.Exit(1)
+    try:
+        result = see_fn(image, question)
+    except Exception as exc:  # noqa: BLE001 — surface any backend error cleanly
+        console.print(f"[red]see failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    console.print(Panel(result, title=f"vision: {image}"))
+
+
+@app.command()
+def recall(
+    query: str = typer.Argument(..., help="Search query"),
+    top_k: int = typer.Option(0, "--top-k", "--k", help="Chunks to retrieve (0 = configured default)"),
+):
+    """Retrieve raw matching chunks without calling the chat model."""
+    try:
+        res = recall_fn(query, top_k=top_k, collection=_COLLECTION)
+    except RuntimeError as exc:
+        console.print(f"[red]recall failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    table = Table(title=f"recall: {res['count']} hit(s)")
+    table.add_column("source")
+    table.add_column("distance", justify="right")
+    table.add_column("text")
+    for hit in res["hits"]:
+        table.add_row(hit["source"], f"{hit['distance']:.4f}", hit["text"][:240])
+    console.print(table)
 
 
 @app.command()
@@ -109,7 +166,7 @@ def learn(
     """Teach second-brain a durable memory and ingest it immediately."""
     memory_text = " ".join(text).strip()
     try:
-        res = learn_memory(memory_text, source=source)
+        res = learn_memory(memory_text, source=source, collection=_COLLECTION)
     except (RuntimeError, ValueError) as exc:
         console.print(f"[red]learn failed:[/] {exc}")
         raise typer.Exit(1) from exc
@@ -269,7 +326,7 @@ def chat():
         if not q:
             continue
         try:
-            res = ask_fn(q)
+            res = ask_fn(q, collection=_COLLECTION)
         except RuntimeError as exc:
             console.print(f"[red]ask failed:[/] {exc}")
             continue
@@ -315,7 +372,7 @@ def agent():
 def status():
     """Show the active backend, models, and how much is stored."""
     try:
-        chunks = str(Store().count())
+        chunks = str(Store(collection=_COLLECTION).count())
     except RuntimeError as exc:
         chunks = f"ERROR: {exc}"
     console.print(
@@ -323,6 +380,7 @@ def status():
             f"backend : {cfg.base_url}\n"
             f"embed   : {cfg.embed_model}\n"
             f"chat    : {cfg.chat_model}\n"
+            f"vision  : {cfg.vision_model}\n"
             f"store   : {cfg.store_backend}\n"
             f"chroma  : {cfg.persist_dir}\n"
             f"qdrant  : {cfg.qdrant_url}\n"

@@ -1,0 +1,139 @@
+{
+  "public": {
+    "label": "ArtJeck",
+    "prompts": [
+      "What does a custom AI agent cost?",
+      "How does a project with ArtJeck actually run?",
+      "Do you repair computers, and where?"
+    ],
+    "answers": {
+      "What does a custom AI agent cost?": {
+        "answer": "AI automation engineering starts at $8,000 per project for a RAG system or AI agent build, shipped production-ready with evaluations and edge-case testing [1]. Smaller engagements exist: a single-workflow automation typically starts around $2,500, and an AI feature with a full evaluation and QA harness from $12,000. Advisory time is $150/hr [1]. Every price is a starting point — the final number is a fixed quote agreed after a short scoping conversation, before any work begins [2].",
+        "latencyMs": 640,
+        "model": "recorded answer",
+        "sources": [
+          {
+            "n": 1,
+            "source": "docs/concierge-corpus.md",
+            "type": "Markdown",
+            "distance": 0.14,
+            "retrieval": "semantic",
+            "text": "### 1. AI Automation Engineering — starting at **$8,000 / project**\nAI agents, RAG systems, prompt engineering, workflow automation, model evaluations, fine-tuning, and business-process automation — shipped production-ready with evals and edge-case testing.\n- Single-workflow automation — typically from **$2,500**\n- RAG system / AI agent build — typically from **$8,000**\n- AI feature + evaluation & QA harness — typically from **$12,000**\n- Advisory / consulting — **$150/hr**"
+          },
+          {
+            "n": 2,
+            "source": "docs/concierge-corpus.md",
+            "type": "Markdown",
+            "distance": 0.21,
+            "retrieval": "keyword",
+            "text": "All project prices are **starting points**; final quotes follow a short scoping conversation. The six anchors below match the website's service cards."
+          }
+        ]
+      },
+      "How does a project with ArtJeck actually run?": {
+        "answer": "You work with one independent engineer end to end — the person who scopes the work is the person who builds and tests it [1]. A project starts with a short scoping conversation that ends in a fixed quote; the build itself carries a software-quality background into AI work, so evaluations and edge-case testing are part of the engineering rather than an afterthought [1]. The code you pay for is yours outright — no platform lock-in, no monthly fees holding the work hostage [2].",
+        "latencyMs": 598,
+        "model": "recorded answer",
+        "sources": [
+          {
+            "n": 1,
+            "source": "docs/concierge-corpus.md",
+            "type": "Markdown",
+            "distance": 0.16,
+            "retrieval": "semantic",
+            "text": "ArtJeck Technology is the studio practice of one independent AI engineer in Sacramento, California. The differentiator is a software-quality (SDLC/STLC) background applied to AI: testing and evals are part of the build, not an afterthought. No account managers, no juniors, no handoffs."
+          },
+          {
+            "n": 2,
+            "source": "docs/concierge-corpus.md",
+            "type": "Markdown",
+            "distance": 0.24,
+            "retrieval": "keyword",
+            "text": "Clients own the code outright. Fixed quotes are agreed before work starts; pricing is published on the site."
+          }
+        ]
+      },
+      "Do you repair computers, and where?": {
+        "answer": "Yes — local computer repair for homes and small businesses, in the Sacramento, CA area only [1]. That covers diagnostics, virus and malware removal, SSD and memory upgrades, setup and data transfer, backups, and Wi-Fi or printer trouble — on-site across Sacramento and nearby cities, or remote when a screen share is faster. Repair work is quoted per job: you get a fixed price for the fix before the repair starts, and no repair prices are published [1]. If you're outside the Sacramento region, repair isn't offered — but the software and AI services are remote-friendly [2].",
+        "latencyMs": 571,
+        "model": "recorded answer",
+        "sources": [
+          {
+            "n": 1,
+            "source": "docs/concierge-corpus.md",
+            "type": "Markdown",
+            "distance": 0.13,
+            "retrieval": "semantic",
+            "text": "### 4. Local Computer Repair — **Sacramento, CA area only**\nDiagnostics, virus removal, SSD/RAM upgrades, setup and data transfer, backups, Wi-Fi and printers — on-site or remote. Every job is quoted individually with a fixed price agreed before the repair starts; no repair prices are published."
+          },
+          {
+            "n": 2,
+            "source": "docs/concierge-corpus.md",
+            "type": "Markdown",
+            "distance": 0.27,
+            "retrieval": "keyword",
+            "text": "Location: Sacramento, CA — serving Sacramento, San Francisco, and the SF Bay Area; remote-friendly for software and AI work."
+          }
+        ]
+      }
+    }
+  },
+  "neutral": {
+    "label": "Neutral",
+    "prompts": [
+      "What are the seven testing principles?",
+      "How should a regression suite be scoped?",
+      "What makes a test case traceable?"
+    ],
+    "answers": {
+      "What are the seven testing principles?": {
+        "answer": "A neutral QA corpus answer would list principles such as testing shows the presence of defects, exhaustive testing is impossible, early testing saves cost, defects cluster, repeated tests lose effectiveness, testing is context dependent, and absence-of-errors does not prove usefulness [1].",
+        "latencyMs": 865,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "evals/corpus/testing-principles.md",
+            "type": "Markdown",
+            "distance": 0.251,
+            "retrieval": "keyword",
+            "text": "Synthetic QA notes: seven testing principles cover defect presence, impossibility of exhaustive testing, early testing, defect clustering, pesticide paradox, context dependence, and absence-of-errors fallacy."
+          }
+        ],
+        "invalid_citations": []
+      },
+      "How should a regression suite be scoped?": {
+        "answer": "A regression suite should cover changed behavior, high-risk integrations, previously failed areas, and stable smoke paths. The useful set is small enough to run often and traceable enough to explain why each test exists [1].",
+        "latencyMs": 701,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "evals/corpus/regression-scope.md",
+            "type": "Markdown",
+            "distance": 0.289,
+            "retrieval": "vector",
+            "text": "Synthetic QA notes: regression coverage should prioritize changed code, critical business flows, integrations, historical defects, and smoke checks that guard release readiness."
+          }
+        ],
+        "invalid_citations": []
+      },
+      "What makes a test case traceable?": {
+        "answer": "A traceable test case points back to a requirement, risk, defect, or acceptance rule, and its expected result is specific enough that a reviewer can see what evidence the test provides [1].",
+        "latencyMs": 722,
+        "model": "local model",
+        "sources": [
+          {
+            "n": 1,
+            "source": "evals/corpus/test-design.md",
+            "type": "Markdown",
+            "distance": 0.31,
+            "retrieval": "keyword",
+            "text": "Synthetic QA notes: traceability connects a test to a requirement or risk, names the condition being checked, and records the expected observable result."
+          }
+        ],
+        "invalid_citations": []
+      }
+    }
+  }
+}

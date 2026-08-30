@@ -22,6 +22,7 @@ class Config:
         self.api_key: str = os.getenv("OPENAI_API_KEY", "ollama")
         self.embed_model: str = os.getenv("EMBED_MODEL", "nomic-embed-text")
         self.chat_model: str = os.getenv("CHAT_MODEL", "llama3.1:8b")
+        self.vision_model: str = os.getenv("VISION_MODEL", "vision")
         self.store_backend: str = os.getenv("SB_STORE", "chroma").lower()
         self.persist_dir: Path = Path(os.getenv("SB_DATA") or (_ROOT / "data" / "chroma"))
         self.memory_dir: Path = Path(os.getenv("SB_MEMORY_DIR") or (_ROOT / "data" / "memory"))

@@ -10,6 +10,9 @@ def test_ask_records_store_embedding_retrieval_and_generation_spans(monkeypatch)
     ask_module = importlib.import_module("secondbrain.ask")
 
     class FakeStore:
+        def __init__(self, *args, **kwargs):
+            pass
+
         def count(self):
             return 1
 

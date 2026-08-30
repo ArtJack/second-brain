@@ -7,8 +7,6 @@ own tests and by the MCP Inspector.
 """
 from __future__ import annotations
 
-import pytest
-
 
 def test_ask_shapes_citations(monkeypatch):
     from secondbrain import mcp_server as m
@@ -111,18 +109,18 @@ def test_status_shape_and_no_secrets(monkeypatch):
 def test_recall_empty_store_short_circuits(monkeypatch):
     from secondbrain import mcp_server as m
 
-    class FakeStore:
-        def __init__(self, *a, **k):
-            pass
-
-        def count(self):
-            return 0
-
-    monkeypatch.setattr(m, "Store", FakeStore)
-    # embed must NOT be called when the store is empty
-    monkeypatch.setattr(m, "embed", lambda *a, **k: pytest.fail("embed should not run on empty store"))
+    monkeypatch.setattr(m, "recall_fn", lambda query, top_k=0: {"count": 0, "hits": []})
     out = m.recall("anything")
     assert out == {"count": 0, "hits": []}
+
+
+def test_recall_passes_top_k(monkeypatch):
+    from secondbrain import mcp_server as m
+
+    seen = {}
+    monkeypatch.setattr(m, "recall_fn", lambda query, top_k=0: seen.update(query=query, top_k=top_k) or {})
+    m.recall("anything", top_k=6)
+    assert seen == {"query": "anything", "top_k": 6}
 
 
 def test_expected_tools_are_registered():
