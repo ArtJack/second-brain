@@ -23,4 +23,7 @@ jobs:
         with:
           enable-cache: true
       - name: Run tests
-        run: uv run --frozen pytest -q
+        # No -q here: pyproject's addopts already supplies one, and a second
+        # suppresses the count/duration summary entirely -- so the CI log ends
+        # with a bare row of dots and nothing you can grep for a test count.
+        run: uv run --frozen pytest
