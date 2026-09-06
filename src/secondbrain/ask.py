@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 
-from .citations import invalid_citations
+from .citations import grounding, invalid_citations
 from .config import cfg
 from .hybrid import hybrid_retrieve
 from .llm import answer, embed
@@ -44,6 +44,7 @@ def ask(
             "answer": "Nothing ingested yet — run `sb ingest <path>` first.",
             "sources": [],
             "invalid_citations": [],
+            "grounding": grounding("", 0),
         }
 
     with _span(trace, "embed_question", kind="embedding", parent_span_id=parent_span_id) as embed_span:
@@ -79,7 +80,10 @@ def ask(
     return {
         "answer": answer_text,
         "sources": sources,
+        # Kept for callers that already read it; `grounding` is the fuller view
+        # and is the only thing that can see a citation-free answer.
         "invalid_citations": invalid_citations(answer_text, len(sources)),
+        "grounding": grounding(answer_text, len(sources)),
     }
 
 

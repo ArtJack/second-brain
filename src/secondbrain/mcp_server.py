@@ -99,6 +99,14 @@ def ask(question: str, top_k: int = 0) -> dict:
             for s in result["sources"]
         ],
         "ungrounded_citations": result.get("invalid_citations", []),
+        # An answer that cites nothing at all is the failure `ungrounded_citations`
+        # structurally cannot see: it reports numbers that do not exist, and there
+        # are none. `citations_present` false alongside `sources_retrieved` > 0
+        # means the model was handed evidence and cited none of it.
+        **{
+            k: result.get("grounding", {}).get(k)
+            for k in ("citations_present", "sources_retrieved")
+        },
     }
 
 
