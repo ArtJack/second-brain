@@ -51,6 +51,20 @@ atexit.register(shutil.rmtree, SANDBOX, ignore_errors=True)
 # cannot reach the real corpus; the network points at a closed port so a
 # regression that adds a live call fails loudly instead of quietly succeeding
 # against the home lab. Port 9 is `discard` — reliably refused, never routed.
+#
+# The behaviour knobs are pinned for a different reason, and it is easy to miss:
+# they change *outcomes*, not just destinations. `SB_CHUNK_SIZE=7` alone reaches
+# an upsert-count assertion in test_collection_routing.py and flips it, because
+# cfg.chunk_size feeds chunk_text() and the test counts chunks. A suite that
+# passes on your machine and fails on a colleague's — or the reverse — is the
+# same class of bug as running against production, just quieter.
+#
+# `SB_WEB_ALLOWED_ORIGINS` is the sharpest of them: server.py evaluates it at
+# module import (`_origins = _allowed_origins()`), before any fixture exists to
+# clean up. A legitimate value silently adds CORS middleware that CI's app does
+# not have, so the object under test stops being the object CI tests; a `*`
+# raises inside the import and takes 17 tests with it. It cannot be fixed by a
+# fixture — only by never letting it arrive.
 PINNED_ENV: dict[str, str] = {
     # storage
     "SB_STORE": "chroma",
@@ -63,6 +77,38 @@ PINNED_ENV: dict[str, str] = {
     "OPENAI_BASE_URL": "http://127.0.0.1:9/v1",
     "QDRANT_URL": "http://127.0.0.1:9",
     "QDRANT_API_KEY": "",
+    # behaviour — config.py's own defaults, so the suite measures the same code
+    # everywhere. Changing one of these is a deliberate act, not an accident of
+    # whose machine ran the tests.
+    "EMBED_MODEL": "nomic-embed-text",
+    "CHAT_MODEL": "llama3.1:8b",
+    "VISION_MODEL": "vision",
+    "SB_CHUNK_SIZE": "1200",
+    "SB_CHUNK_OVERLAP": "150",
+    "SB_TOP_K": "5",
+    "SB_WEATHER_LOCATION": "",
+    "SB_HYBRID": "1",
+    # web — the deployed demo's .env sets REQUIRE_AUTH and a concierge
+    # collection, and `tests/test_server.py` has long stripped those in an
+    # autouse fixture. That fixture is file-local, so any other module touching
+    # `secondbrain.server` inherited the developer's live web config instead:
+    # a test written outside that file gets 401s that CI never sees.
+    #
+    # Pinned to server.py's own defaults rather than to "" — `_env` returns the
+    # empty string when a variable is set-but-empty, so blanking a collection
+    # name yields "" instead of falling back to the default.
+    "SB_WEB_ALLOWED_ORIGINS": "",  # read at import time (see above)
+    "SB_WEB_REQUIRE_AUTH": "",
+    "SB_WEB_READ_TOKEN": "",
+    "SB_WEB_OWNER_TOKEN": "",
+    "SB_WEB_SANDBOX_ENABLED": "",
+    "SB_WEB_PUBLIC_COLLECTION": "second_brain_public",
+    "SB_WEB_NEUTRAL_COLLECTION": "second_brain_neutral",
+    # One TestClient address serves every request, so a live budget would trip
+    # across unrelated tests. 0 disables it; the rate-limit tests set their own.
+    "SB_WEB_RATE_LIMIT_PER_MIN": "0",
+    "SB_WEB_HOST": "127.0.0.1",
+    "SB_WEB_PORT": "8850",
 }
 
 os.environ.update(PINNED_ENV)
