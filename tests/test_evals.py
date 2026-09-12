@@ -235,3 +235,60 @@ def test_resolve_corpus_paths_relative_to_benchmark(tmp_path):
     benchmark_path = tmp_path / "suite.json"
 
     assert resolve_corpus_paths({"corpus": ["corpus"]}, benchmark_path) == [tmp_path / "corpus"]
+
+
+class TestScoringNothingIsNotPassing:
+    """A run that measured nothing exited 0 and printed a table of dashes.
+
+    `sb eval` has been the gate on every retrieval change tonight, run against
+    freshly created collections all night long. Its contract is "the change
+    ships only if retrieval does not regress" — and a run that scored zero
+    cases satisfied that contract vacuously. `retrieval 0/0  hit-rate -  MRR -`,
+    exit code 0, reads as a pass in a terminal and *is* a pass to CI.
+
+    Three ways to get there, all reachable by accident: a `--tag` filter that
+    happens to select only abstention cases, a benchmark pointed at a
+    collection that was never ingested, and a corpus whose files all failed to
+    decode. The first cost nothing to produce while writing this test.
+    """
+
+    def _abstain_only(self):
+        return _benchmark([_case(id="a", expect_abstain=True), _case(id="b", expect_abstain=True)])
+
+    def test_a_report_that_scored_nothing_does_not_pass(self):
+        report = run_benchmark(self._abstain_only(), retrieve_fn=lambda q, k: [])
+
+        assert report["summary"]["retrieval_cases"] == 0
+        assert report["passed"] is False, "measuring nothing is not the same as measuring success"
+
+    def test_an_abstention_only_run_that_grades_answers_still_passes(self):
+        """The boundary: that run measured abstention, which is a real measurement."""
+        report = run_benchmark(
+            self._abstain_only(),
+            include_answers=True,
+            retrieve_fn=lambda q, k: [],
+            answer_fn=lambda q, k: {"answer": "NOT_IN_SOURCES: the context does not say.", "sources": []},
+        )
+
+        assert report["summary"]["retrieval_cases"] == 0
+        assert report["passed"] is True
+        assert report["failure_reason"] is None
+
+    def test_the_report_names_the_reason_rather_than_only_failing(self):
+        report = run_benchmark(self._abstain_only(), retrieve_fn=lambda q, k: [])
+
+        assert "scored no retrieval cases" in report["failure_reason"]
+
+    def test_a_report_that_scored_cases_and_passed_them_still_passes(self):
+        report = run_benchmark(
+            _benchmark([_case()]),
+            retrieve_fn=lambda q, k: [{"document": "d", "metadata": {"source": "notes/lab.md"}, "distance": 0.1}],
+        )
+
+        assert report["passed"] is True
+        assert report["failure_reason"] is None
+
+    def test_a_benchmark_with_no_cases_at_all_does_not_pass(self):
+        report = run_benchmark(_benchmark([]), retrieve_fn=lambda q, k: [])
+
+        assert report["passed"] is False
