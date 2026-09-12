@@ -17,6 +17,7 @@ sb overnight                 # safe nightly scan: ingest changed files + write a
 sb morning                   # daily briefing from overnight runs, tasks, and cited RAG
 sb status
 sb gc --dry-run              # show chunks whose source file is gone; drop the flag to remove them
+sb keyword-reindex --corpus all   # one-off backfill for collections ingested before the keyword index
 sb eval                      # retrieval benchmark (add --answers for chat-model checks)
 SB_COLLECTION=second_brain_regression sb eval evals/regression.json --ingest-corpus
 sb eval --answers --trace-output data/eval-traces.json
@@ -32,10 +33,12 @@ sb eval-intake               # build a private 100-question benchmark in the ter
 - **Citations are mandatory.** The system prompt forces the model to answer *only* from
   retrieved context and cite `[n]`; the CLI prints the source files + distances. No source,
   no claim — that's the trust signal that separates a real RAG product from a demo.
-- **Hybrid retrieval rescues exact lookups.** Vector search finds semantic matches; a tiny
-  local BM25 pass rescues exact section/list lookups embeddings miss. Results are fused and
-  de-duplicated, keyword hits expand to adjacent chunks, and every answer still has to be
-  cited. `SB_HYBRID` toggles it for A/B checks.
+- **Hybrid retrieval rescues exact lookups.** Vector search finds semantic matches; a
+  persisted SQLite FTS5 index rescues the exact section and list lookups embeddings miss.
+  The two ranked lists are fused by reciprocal rank rather than by score, because a cosine
+  distance and a BM25-derived one share no scale and pretending otherwise is how a fusion
+  quietly becomes a coin flip. Keyword hits expand to adjacent chunks, the result is capped
+  at `k`, and every answer still has to be cited. `SB_HYBRID` toggles it for A/B checks.
 - **Learning is explicit and inspectable.** `sb learn` and `/learn` in agent mode write
   Markdown memory files under `SB_MEMORY_DIR`, then ingest them through the same cited RAG
   pipeline. The model does not silently save its own guesses as truth.

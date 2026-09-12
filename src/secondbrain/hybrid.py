@@ -1,43 +1,22 @@
-"""Small local keyword retriever to complement semantic vector search."""
+"""Keyword retrieval alongside semantic vector search, and the fusion of the two."""
 from __future__ import annotations
 
 import math
 import re
 
-STOPWORDS = {
-    "about",
-    "all",
-    "and",
-    "are",
-    "can",
-    "did",
-    "does",
-    "for",
-    "from",
-    "how",
-    "into",
-    "is",
-    "its",
-    "me",
-    "my",
-    "of",
-    "or",
-    "that",
-    "the",
-    "their",
-    "them",
-    "this",
-    "to",
-    "what",
-    "when",
-    "where",
-    "which",
-    "who",
-    "why",
-    "with",
-    "you",
-    "your",
-}
+from .keyword_index import STOPWORDS, KeywordIndex
+
+# One index for the process. Tests replace this attribute directly.
+_index = KeywordIndex()
+
+# Reciprocal-rank fusion's smoothing constant, from Cormack et al. (2009). It
+# damps the top of each list so one retriever's first result cannot dominate the
+# other's entirely — which matters here because the two scores are not
+# commensurable: cosine distance and 1/(1+bm25) share no scale. Fusing on rank
+# sidesteps that instead of pretending the numbers can be compared.
+RRF_K = 60
+
+# The shared stopword set lives with the index that also needs it.
 
 
 def _words(text: str) -> list[str]:
@@ -121,15 +100,36 @@ def _expand_keyword_neighbors(store, hits: list[dict], right: int = 2) -> list[d
     return _merge_hits(expanded)
 
 
-def keyword_query(store, query: str, limit: int = 3) -> list[dict]:
-    """Rank stored chunks with a tiny BM25-style scorer.
+def _intent_boost(hits: list[dict], query: str, tokens: list[str]) -> list[dict]:
+    """Nudge a numbered list to the top when the question asks for one.
 
-    This is intentionally simple and local: it rescues exact section/list lookups that
-    embeddings sometimes miss, while the answer still has to cite retrieved chunks.
+    FTS5 ranks by term statistics and has no idea that "what are the steps" wants
+    the chunk that contains `1.`, `2.`, `3.`. This preserves the one piece of
+    judgement the hand-rolled scorer had that a general-purpose index does not.
+    """
+    if not _has_list_intent(query, tokens):
+        return hits
+    listed, rest = [], []
+    for hit in hits:
+        target = listed if re.search(r"(?:^|\n)\s*1\.\s+[A-Z]", hit.get("document", "")) else rest
+        target.append(hit)
+    return listed + rest
+
+
+def keyword_query(store, query: str, limit: int = 3) -> list[dict]:
+    """Rank stored chunks by keyword, from the persisted index where one exists.
+
+    Rescues the exact section and list lookups that embeddings miss, while the
+    answer still has to cite whatever comes back. A collection ingested before
+    the index existed has no rows in it, and falls back to the original scan so
+    that data keeps working rather than silently returning nothing.
     """
     if limit <= 0:
         return []
     tokens = _keywords(query)
+    collection = getattr(store, "collection_name", None)
+    if collection and _index.count(collection):
+        return _intent_boost(_index.query(collection, query, limit=limit), query, tokens)
     if not tokens:
         return []
     try:
@@ -180,6 +180,27 @@ def keyword_query(store, query: str, limit: int = 3) -> list[dict]:
     return [hit for _, hit in scored[:limit]]
 
 
+def _reciprocal_rank_fusion(groups: list[list[dict]], limit: int) -> list[dict]:
+    """Combine ranked lists by position rather than by score.
+
+    Each list votes 1/(k + rank) for the documents it ranked. Two retrievers that
+    both like a chunk beat one that likes it a lot, and no calibration between
+    cosine distance and a BM25-derived distance is needed — which is the point,
+    since there is none to be had.
+    """
+    scores: dict[tuple, float] = {}
+    best: dict[tuple, dict] = {}
+    for group in groups:
+        for rank, hit in enumerate(group, start=1):
+            key = _hit_key(hit)
+            scores[key] = scores.get(key, 0.0) + 1 / (RRF_K + rank)
+            # Keep the first sighting, so a hit found by both retrievers keeps
+            # the `retrieval` label and distance of whichever ranked it first.
+            best.setdefault(key, hit)
+    ordered = sorted(scores, key=lambda key: scores[key], reverse=True)
+    return [best[key] for key in ordered[:limit]]
+
+
 def hybrid_retrieve(
     store,
     query: str,
@@ -189,9 +210,16 @@ def hybrid_retrieve(
     enabled: bool = True,
     keyword_limit: int = 3,
 ) -> list[dict]:
-    """Vector search, optionally fused with local BM25 keyword hits + neighbor expansion."""
+    """Vector search, optionally fused with keyword hits and their neighbours.
+
+    Returns at most `limit` hits. It used to return more: keyword hits and up to
+    two neighbours each were prepended to a full page of vector hits and never
+    truncated, so `limit=5` could return fourteen chunks and the caller's k was a
+    floor rather than a cap.
+    """
     vector_hits = store.query(qvec, limit)
     if not enabled:
         return vector_hits
     keyword_hits = keyword_query(store, query, limit=min(keyword_limit, limit))
-    return _merge_hits(_expand_keyword_neighbors(store, keyword_hits), vector_hits)
+    expanded = _expand_keyword_neighbors(store, keyword_hits)
+    return _reciprocal_rank_fusion([expanded, vector_hits], limit)

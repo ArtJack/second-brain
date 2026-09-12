@@ -25,6 +25,10 @@ class ChromaStore:
             metadata={"hnsw:space": "cosine"},
         )
 
+    @property
+    def collection_name(self) -> str:
+        return self._col.name
+
     def upsert(self, ids, embeddings, documents, metadatas) -> None:
         self._col.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
@@ -112,6 +116,10 @@ class QdrantStore:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message="Api key is used with an insecure connection.")
                 self._client = QdrantClient(url=cfg.qdrant_url, api_key=cfg.qdrant_api_key)
+
+    @property
+    def collection_name(self) -> str:
+        return self._collection
 
     @staticmethod
     def _point_id(source_id: str) -> str:

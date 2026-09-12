@@ -9,8 +9,14 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from .config import cfg
+from .keyword_index import KeywordIndex
 from .llm import embed
 from .store import Store
+
+# The keyword index mirrors the store: every upsert and every delete that
+# happens there happens here too, or keyword search starts answering from a
+# corpus that no longer exists.
+_index = KeywordIndex()
 
 SUPPORTED = {
     ".md", ".markdown", ".txt", ".rst",
@@ -67,8 +73,10 @@ def discover(root: str | Path) -> list[Path]:
 def ingest_paths(path: str | Path, reset: bool = False, collection: str | None = None) -> Iterator[tuple[Path, int]]:
     """Yield (file, n_chunks) as each file is ingested, for live progress."""
     store = Store(collection=collection)
+    index_name = getattr(store, "collection_name", None) or collection or cfg.collection
     if reset:
         store.reset()
+        _index.reset(index_name)
     for f in discover(path):
         text = read_file(f)
         chunks = chunk_text(text, cfg.chunk_size, cfg.chunk_overlap)
@@ -78,9 +86,17 @@ def ingest_paths(path: str | Path, reset: bool = False, collection: str | None =
         # orphans. (Skipped on reset=True, which already wiped the whole collection.)
         if not reset:
             store.delete_source(src)
+            _index.delete_source(index_name, src)
         if not chunks:
             continue
         ids = [f"{src}#{i}" for i in range(len(chunks))]
         metadatas = [{"source": src, "name": f.name, "chunk": i} for i in range(len(chunks))]
         store.upsert(ids=ids, embeddings=embed(chunks), documents=chunks, metadatas=metadatas)
+        _index.upsert_chunks(
+            index_name,
+            [
+                {"source": src, "chunk": i, "name": f.name, "document": chunk}
+                for i, chunk in enumerate(chunks)
+            ],
+        )
         yield f, len(chunks)
