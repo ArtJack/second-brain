@@ -11,38 +11,41 @@ Measured, k=5, `SB_HYBRID=1`, Qdrant, twenty documents, with answers generated:
 
 **Answer rubric 4 of 4 passed, score 100%.** The model gives the correct answer
 in every distractor case, including the two where the wrong document is ranked
-*first*. Asked "what time does the offsite backup run", retrieval puts the local
-snapshot policy at rank 1 and the offsite policy at rank 2, and the answer reads
-"The offsite backup runs at **03:30 daily** [2]" — it skipped source 1 and cited
-source 2. Asked which agent owns QA, it cites only the current routing document
-and never the one marked SUPERSEDED.
+*first*. Every document and question in this entry belongs to the fictional
+benchmark corpus in `evals/corpus-hard/`, not to any real policy. On the
+fixture's offsite-backup case, retrieval ranks the fixture's local-snapshot
+document first and its offsite document second, and the answer skips source 1
+and cites source 2. On the fixture's QA-routing case it cites only the fixture's
+current routing document, never the one marked superseded.
 
 So the distractor rate measures **context waste, not wrong answers.** The answer
 layer is already doing the disambiguation that ranking is not.
 
 ### The ranked lists, which say why no threshold fixes this
 
-| case | rank 1 | rank 2 | slots 3–5 |
+| benchmark case | rank 1 | rank 2 | slots 3–5 |
 |---|---|---|---|
-| offsite schedule | **wrong** 0.098 | right 0.123 | 0.281 – 0.508 |
-| local snapshots | right 0.083 | **wrong** 0.119 | 0.252 – 0.459 |
-| qa routing | right 0.060 | **wrong** 0.130 | 0.284 – 0.447 |
-| qa share frozen | **wrong** 0.119 | right 0.229 | 0.349 – 0.504 |
+| `distractor-offsite-schedule` | **wrong** 0.098 | right 0.123 | 0.281 – 0.508 |
+| `distractor-local-snapshots-are-not-a-backup` | right 0.083 | **wrong** 0.119 | 0.252 – 0.459 |
+| `superseded-qa-routing` | right 0.060 | **wrong** 0.130 | 0.284 – 0.447 |
+| `superseded-qa-share-is-frozen` | **wrong** 0.119 | right 0.229 | 0.349 – 0.504 |
 
 Two things fall out of that table.
 
-**A relevance floor cannot fix the distractor problem.** In the offsite case the
-wrong document is *closer* than the right one, 0.098 against 0.123. Any threshold
-that drops one drops the other. This is not a tuning failure: `backup-offsite.md`
-and `backup-local.md` are both current, both correct, and each is the right answer
-to the other's question. No ranking signal distinguishes them, because none exists
-in the documents.
+**A relevance floor cannot fix the distractor problem.** In the
+`distractor-offsite-schedule` case the wrong fixture document scores *closer*
+than the right one, 0.098 against 0.123. Any threshold that drops one drops the
+other. This is not a tuning failure: the two fixture documents are both written
+as current within the benchmark, and each is the right answer to the other
+case's question. No ranking signal distinguishes them, because none exists in
+the documents.
 
 **A relevance floor would fix something else entirely.** Slots 3 to 5 sit at 0.25
 to 0.51 while every real match is under 0.23, a clean and consistent gap. Three of
 five slots in every one of these cases go to documents that are simply not about
-the question — `vault-rotation.md` and `health-checks.md` returned for a question
-about backup timing. That is the 28.9% precision, and it is the thing worth fixing.
+the question — fixture documents on key rotation and health checks returned for
+the fixture's backup-timing case. That is the 28.9% precision, and it is the
+thing worth fixing.
 
 **No adjacency padding appeared in any slot.** Every one was a real match from one
 retriever or the other, so the SB-F-27 fix is holding under measurement.
@@ -88,8 +91,8 @@ is what the gate asked for. The honest reading is that this is a modest change:
 ranking improved slightly and nothing regressed.
 
 **It did not touch the distractor problem, and there is a reason worth writing
-down.** The superseded document's own H1 is "QA routing (SUPERSEDED — kept as
-the record of what it used to be)", so every one of its chunks now carries the
+down.** The benchmark's superseded fixture document declares itself superseded
+in its own first heading, so every one of its chunks now carries the
 word SUPERSEDED into both the embedding and the keyword index. The signal is
 present in the index for the first time. Nothing reads it. A demotion rule for
 documents that declare themselves superseded is the obvious next step, and it is
@@ -149,10 +152,11 @@ Both benchmarks, same machine, same day, k=5, `SB_HYBRID=1`, Qdrant:
 
 **The headline is the distractor rate.** All four cases that named a near-miss
 document retrieved it, out of a corpus of twenty. Retrieval has no notion of
-supersession or recency: asked which agent owns QA, it returns the current
-routing document *and* the one marked "SUPERSEDED — do not action anything in
-this file", and the answer is then built from both. Asked for the offsite backup
-time it returns the local snapshot policy alongside. Source recall stays at
+supersession or recency: on the fixture's QA-routing case it returns the
+fixture's current routing document *and* its superseded one, and I inferred the
+answer was built from both — the entry above measured that, and it was not. On
+the fixture's offsite-backup case it returns the fixture's local snapshot policy
+alongside. Source recall stays at
 100%, so every older metric says this is working perfectly.
 
 That is now a measured, reproducible number to drive down rather than a
