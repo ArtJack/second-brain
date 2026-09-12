@@ -14,6 +14,8 @@ ingestion pipeline, which has its own tests.
 
 from __future__ import annotations
 
+import asyncio
+
 from pathlib import Path
 
 import pytest
@@ -39,7 +41,7 @@ def test_ingest_reports_file_and_chunk_counts(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(m, "ingest_paths", fake_ingest_paths)
     monkeypatch.setattr(m, "Store", FakeStore)
 
-    result = m.ingest(str(target))
+    result = asyncio.run(m.ingest(str(target)))
 
     assert seen["path"] == str(target)
     assert result["files"] == 2
@@ -60,7 +62,7 @@ def test_ingest_expands_a_user_relative_path(monkeypatch, tmp_path: Path) -> Non
     monkeypatch.setenv("HOME", str(tmp_path))
     (tmp_path / "note.md").write_text("hello")
 
-    result = m.ingest("~/note.md")
+    result = asyncio.run(m.ingest("~/note.md"))
 
     assert seen["path"] == str(tmp_path / "note.md")
     assert result["path"] == str(tmp_path / "note.md")
@@ -76,7 +78,7 @@ def test_ingest_refuses_a_missing_path_before_touching_the_store(monkeypatch, tm
 
     missing = tmp_path / "does-not-exist.md"
     with pytest.raises(ValueError, match="Path not found"):
-        m.ingest(str(missing))
+        asyncio.run(m.ingest(str(missing)))
 
     assert called == [], "ingestion ran despite the path not existing"
 
@@ -93,7 +95,7 @@ def test_learn_forwards_the_fact_and_returns_the_memory_path(monkeypatch) -> Non
 
     monkeypatch.setattr(m, "learn_memory", fake_learn_memory)
 
-    result = m.learn("The lab gateway is the only front door for models.")
+    result = asyncio.run(m.learn("The lab gateway is the only front door for models."))
 
     assert seen["fact"] == "The lab gateway is the only front door for models."
     assert result == {"memory_file": "/tmp/memories/2026-09-06-a-fact.md", "chunks": 2}
@@ -111,7 +113,7 @@ def test_learn_stringifies_a_path_object_from_the_memory_layer(monkeypatch) -> N
         m, "learn_memory", lambda fact: {"path": Path("/tmp/memories/x.md"), "chunks": 1}
     )
 
-    result = m.learn("anything")
+    result = asyncio.run(m.learn("anything"))
 
     assert isinstance(result["memory_file"], str)
     assert result["memory_file"] == "/tmp/memories/x.md"
@@ -127,4 +129,4 @@ def test_learn_does_not_swallow_a_failure_from_the_memory_layer(monkeypatch) -> 
     monkeypatch.setattr(m, "learn_memory", boom)
 
     with pytest.raises(OSError, match="disk full"):
-        m.learn("a fact that cannot be written")
+        asyncio.run(m.learn("a fact that cannot be written"))

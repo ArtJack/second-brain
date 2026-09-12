@@ -7,6 +7,8 @@ own tests and by the MCP Inspector.
 """
 from __future__ import annotations
 
+import asyncio
+
 from secondbrain.citations import grounding
 
 
@@ -27,7 +29,7 @@ def test_ask_shapes_citations(monkeypatch):
         }
 
     monkeypatch.setattr(m, "ask_fn", fake_ask)
-    out = m.ask("q")
+    out = asyncio.run(m.ask("q"))
     assert out["answer"] == "A"
     assert out["citations"] == [{"n": 1, "source": "/x.md", "distance": 0.1234}]
     assert out["ungrounded_citations"] == []
@@ -43,7 +45,7 @@ def test_ask_passes_top_k(monkeypatch):
         lambda q, k=None, collection=None: seen.update(k=k)
         or {"answer": "", "sources": [], "grounding": grounding("", 0)},
     )
-    m.ask("q", top_k=7)
+    asyncio.run(m.ask("q", top_k=7))
     assert seen["k"] == 7
 
 
@@ -61,7 +63,7 @@ def test_list_tasks_passes_status(monkeypatch):
             return [{"id": 1, "title": "t", "status": status, "created_at": "now", "notes": "", "completed_at": None}]
 
     monkeypatch.setattr(m, "TaskStore", FakeTS)
-    out = m.list_tasks(status="all")
+    out = asyncio.run(m.list_tasks(status="all"))
     assert captured["status"] == "all"
     assert out["count"] == 1
     assert out["tasks"][0] == {"id": 1, "title": "t", "status": "all", "created_at": "now"}
@@ -78,7 +80,7 @@ def test_add_task_shape(monkeypatch):
             return {"id": 5, "title": title, "status": "open", "notes": notes, "created_at": "now", "completed_at": None}
 
     monkeypatch.setattr(m, "TaskStore", FakeTS)
-    out = m.add_task("write docs")
+    out = asyncio.run(m.add_task("write docs"))
     assert out == {"id": 5, "title": "write docs", "status": "open", "created_at": "now"}
 
 
@@ -93,7 +95,7 @@ def test_complete_missing_task_is_false(monkeypatch):
             raise KeyError("nope")
 
     monkeypatch.setattr(m, "TaskStore", FakeTS)
-    out = m.complete_task(999)
+    out = asyncio.run(m.complete_task(999))
     assert out["completed"] is False
     assert out["task_id"] == 999
 
@@ -109,7 +111,7 @@ def test_status_shape_and_no_secrets(monkeypatch):
             return 7
 
     monkeypatch.setattr(m, "Store", FakeStore)
-    s = m.status()
+    s = asyncio.run(m.status())
     for key in ("store", "backend", "embed_model", "chat_model", "memory_dir", "state_db", "chunks"):
         assert key in s, f"status() missing {key}"
     assert s["chunks"] == 7
@@ -121,7 +123,7 @@ def test_recall_empty_store_short_circuits(monkeypatch):
     from secondbrain import mcp_server as m
 
     monkeypatch.setattr(m, "recall_fn", lambda query, top_k=0: {"count": 0, "hits": []})
-    out = m.recall("anything")
+    out = asyncio.run(m.recall("anything"))
     assert out == {"count": 0, "hits": []}
 
 
@@ -130,7 +132,7 @@ def test_recall_passes_top_k(monkeypatch):
 
     seen = {}
     monkeypatch.setattr(m, "recall_fn", lambda query, top_k=0: seen.update(query=query, top_k=top_k) or {})
-    m.recall("anything", top_k=6)
+    asyncio.run(m.recall("anything", top_k=6))
     assert seen == {"query": "anything", "top_k": 6}
 
 

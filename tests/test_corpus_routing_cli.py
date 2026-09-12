@@ -14,6 +14,8 @@ types every day and the one the MCP server calls on their behalf.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from secondbrain.config import cfg, collections_for
@@ -116,8 +118,8 @@ def test_the_mcp_ask_tool_forwards_its_corpus(monkeypatch):
 
     monkeypatch.setattr(mcp_server, "ask_fn", fake_ask)
 
-    mcp_server.ask("anything")
-    mcp_server.ask("anything", corpus="reference")
+    asyncio.run(mcp_server.ask("anything"))
+    asyncio.run(mcp_server.ask("anything", corpus="reference"))
 
     assert seen == [[cfg.collection], [cfg.reference_collection]]
 

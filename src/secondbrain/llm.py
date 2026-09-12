@@ -10,22 +10,28 @@ import mimetypes
 from collections.abc import Iterator
 from pathlib import Path
 
-from openai import OpenAI
+from openai import BadRequestError, OpenAI
 
 from .config import cfg
 
-_client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+_client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key, timeout=cfg.llm_timeout_s, max_retries=1)
 
 
 def embed(texts: list[str]) -> list[list[float]]:
-    """Embed a list of texts. Tries one batched call; falls back to per-item if the
-    backend rejects batches (some Ollama builds do)."""
+    """Embed a list of texts, in one batched call where the backend allows it.
+
+    The per-item fallback exists for one reason: some Ollama builds reject a
+    batched `input`. It is now scoped to exactly that — a 4xx saying the request
+    shape was wrong. It used to catch every exception, so a gateway that was
+    simply unreachable turned one failed call into N more, each waiting out the
+    client timeout: the slowest possible way to discover the lab is asleep.
+    """
     if not texts:
         return []
     try:
         resp = _client.embeddings.create(model=cfg.embed_model, input=texts)
         return [d.embedding for d in resp.data]
-    except Exception:
+    except BadRequestError:
         out: list[list[float]] = []
         for t in texts:
             resp = _client.embeddings.create(model=cfg.embed_model, input=t)

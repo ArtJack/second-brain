@@ -39,6 +39,10 @@ class Config:
         self.chunk_overlap: int = int(os.getenv("SB_CHUNK_OVERLAP", "150"))
         self.top_k: int = int(os.getenv("SB_TOP_K", "5"))
         self.weather_location: str | None = os.getenv("SB_WEATHER_LOCATION") or None
+        # The SDK default is 600 s with two retries. On a home lab reachable over a
+        # tailnet, that is indistinguishable from a hang — and the MCP server that
+        # waits on it is shared by every session on the network.
+        self.llm_timeout_s: float = float(os.getenv("SB_LLM_TIMEOUT_S", "60"))
         self.hybrid_enabled: bool = os.getenv("SB_HYBRID", "1").strip().lower() not in {
             "0",
             "false",

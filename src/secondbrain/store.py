@@ -92,9 +92,15 @@ class ChromaStore:
         return self._col.count()
 
     def reset(self) -> None:
-        self._client.delete_collection(self._col.name)
+        # Rebuild the collection this store was opened on, not the configured
+        # default. Reading cfg.collection here meant `sb --collection scratch
+        # ingest --reset` wiped `scratch` and then pointed the handle at the
+        # owner's real brain, so every upsert for the rest of that run landed
+        # there. QdrantStore.reset never had the bug; Chroma is the default.
+        name = self._col.name
+        self._client.delete_collection(name)
         self._col = self._client.get_or_create_collection(
-            name=cfg.collection, metadata={"hnsw:space": "cosine"}
+            name=name, metadata={"hnsw:space": "cosine"}
         )
 
 
