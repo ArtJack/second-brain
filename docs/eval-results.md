@@ -32,6 +32,32 @@ document in the corpus a candidate and diluted BM25 across all of them — enoug
 to move `admin-invoice-format`'s correct source from rank 1 to rank 3. Restoring
 the filter returned MRR to 1.0. That is pinned by a test now.
 
+### Later the same day: fusion order, and a measured cost
+
+Verdict found that neighbours were entering the fused list at retrieved ranks, so
+at the default k=5 two of five answer slots went to adjacency padding that
+matched nothing, while two of three real keyword matches were dropped. Fixing it
+— fuse what the retrievers matched, expand neighbours only into leftover slots —
+costs one case on this benchmark:
+
+| metric | padding in the cap | real matches first |
+|---|---:|---:|
+| retrieval hit-rate / recall / MRR | 1.0 / 1.0 / 1.0 | 1.0 / 1.0 / 1.0 |
+| answers passed | 20 | 19 |
+| rubric | 0.9615 | 0.9551 |
+| abstention | 4 of 4 | 4 of 4 |
+
+The case is `lab-code-route`, and retrieval was correct in both: the expected
+source came back at rank 1. What changed is that the answer no longer contains
+the phrase `workstation-01`, which lives in the *adjacent* chunk.
+
+That is the benchmark's structure rather than a real regression. Its fixtures are
+seven-to-ten-line documents, so a "neighbour" is usually the rest of the same
+small note and padding looks free. On the 1,548-chunk personal corpus a neighbour
+is a different part of a long document and competes with evidence that actually
+matched. The change is shipped on that reasoning, with the cost recorded here
+rather than tuned away, and it is a case the harder benchmark should settle.
+
 ### What the benchmark could not measure
 
 Both measured on the live `second_brain` collection (1,550 chunks after the

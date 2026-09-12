@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import re
+import sqlite3
 
 from .keyword_index import STOPWORDS, KeywordIndex
 
@@ -128,8 +129,15 @@ def keyword_query(store, query: str, limit: int = 3) -> list[dict]:
         return []
     tokens = _keywords(query)
     collection = getattr(store, "collection_name", None)
-    if collection and _index.count(collection):
-        return _intent_boost(_index.query(collection, query, limit=limit), query, tokens)
+    if collection:
+        try:
+            if _index.count(collection):
+                return _intent_boost(_index.query(collection, query, limit=limit), query, tokens)
+        except sqlite3.Error:
+            # Keyword search widens a hybrid answer; it is not a dependency of
+            # one. An unreadable index costs the keyword half, where letting the
+            # error through costs the whole answer.
+            return []
     if not tokens:
         return []
     try:
@@ -221,5 +229,18 @@ def hybrid_retrieve(
     if not enabled:
         return vector_hits
     keyword_hits = keyword_query(store, query, limit=min(keyword_limit, limit))
-    expanded = _expand_keyword_neighbors(store, keyword_hits)
-    return _reciprocal_rank_fusion([expanded, vector_hits], limit)
+
+    # Fuse what the two retrievers actually matched, and nothing else. Neighbours
+    # used to be spliced in before fusion, which handed each of them a retrieved
+    # rank they had not earned: at the default k=5 an answer was built from one
+    # keyword hit, two of its neighbours and two vector hits, and a chunk that
+    # matched nothing outscored the second real keyword match. Adjacency is
+    # context, not evidence.
+    fused = _reciprocal_rank_fusion([keyword_hits, vector_hits], limit)
+    if len(fused) >= limit:
+        return fused
+
+    # Room left over: widen the surviving keyword hits with their neighbours,
+    # which is what adjacency was for before the result set had a cap.
+    padded = _merge_hits(fused, _expand_keyword_neighbors(store, fused))
+    return padded[:limit]

@@ -84,8 +84,17 @@ class KeywordIndex:
         self._known: set[str] = set()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        # WAL, because the MCP tools became genuinely concurrent: ingest writes
+        # this file from one worker thread while ask reads it from another. In
+        # the default rollback-journal mode a write holds an EXCLUSIVE lock for
+        # the whole transaction and a reader waits only busy_timeout before
+        # raising `database is locked` — which reached the client as a hard error
+        # on the user-facing path. WAL lets readers proceed during a write; the
+        # longer timeout covers the checkpoint.
+        conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
     def _ensure(self, conn: sqlite3.Connection, collection: str) -> str:
@@ -112,15 +121,20 @@ class KeywordIndex:
             return
         with self._connect() as conn:
             table = self._ensure(conn, collection)
-            for row in rows:
-                conn.execute(
-                    f"DELETE FROM {table} WHERE source = ? AND chunk = ?",
-                    (row["source"], row["chunk"]),
-                )
-                conn.execute(
-                    f"INSERT INTO {table} (source, chunk, name, document) VALUES (?, ?, ?, ?)",
-                    (row["source"], row["chunk"], row.get("name", ""), row.get("document", "")),
-                )
+            # One DELETE per source, not per chunk. `source` and `chunk` are
+            # UNINDEXED FTS5 columns with no b-tree behind them, so each DELETE
+            # scans the whole table: deleting per chunk made an ingest quadratic
+            # in corpus size, and the transaction that held the write lock grew
+            # with it. Re-ingesting a file replaces all of its rows anyway.
+            for source in dict.fromkeys(row["source"] for row in rows):
+                conn.execute(f"DELETE FROM {table} WHERE source = ?", (source,))
+            conn.executemany(
+                f"INSERT INTO {table} (source, chunk, name, document) VALUES (?, ?, ?, ?)",
+                [
+                    (row["source"], row["chunk"], row.get("name", ""), row.get("document", ""))
+                    for row in rows
+                ],
+            )
 
     def delete_source(self, collection: str, source: str) -> None:
         with self._connect() as conn:

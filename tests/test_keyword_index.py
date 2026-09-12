@@ -233,3 +233,122 @@ def test_cyrillic_terms_survive_the_english_stopword_filter(index):
     from secondbrain.keyword_index import query_terms
 
     assert query_terms("какая цель курса") == ["какая", "цель", "курса"]
+
+
+def test_the_index_uses_wal_so_a_long_write_does_not_lock_out_readers(tmp_path):
+    """Verdict SB-F-29: making the MCP tools async made these genuinely concurrent.
+
+    In rollback-journal mode a write takes an EXCLUSIVE lock for the whole
+    transaction and readers wait only busy_timeout before raising. A 20,000-chunk
+    ingest held it for 66 s, and a concurrent `ask` failed with "database is
+    locked" — as a hard tool error on the user-facing path.
+    """
+    import sqlite3
+
+    index = KeywordIndex(tmp_path / "wal.sqlite3")
+    index.upsert_chunks("c", _rows(("/a.md", 0, "gateway")))
+
+    with sqlite3.connect(index.path) as conn:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal", f"journal_mode is {mode}: one writer still blocks every reader"
+
+
+def test_a_reader_works_while_a_writer_holds_a_transaction(tmp_path):
+    """The property, not the pragma."""
+    import sqlite3
+    import threading
+
+    index = KeywordIndex(tmp_path / "concurrent.sqlite3")
+    index.upsert_chunks("c", _rows(("/seed.md", 0, "gateway routing")))
+
+    holding = threading.Event()
+    release = threading.Event()
+    errors: list[Exception] = []
+
+    def writer():
+        conn = sqlite3.connect(index.path)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("INSERT INTO kw_c (source, chunk, name, document) VALUES ('/w.md', 0, 'w.md', 'gateway')")
+            holding.set()
+            release.wait(timeout=5)
+            conn.commit()
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            conn.close()
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    try:
+        assert holding.wait(timeout=5), "writer never acquired its transaction"
+        hits = index.query("c", "gateway routing", limit=5)
+    finally:
+        release.set()
+        thread.join(timeout=10)
+
+    assert not errors, errors
+    assert hits, "a reader must not be locked out by an in-flight write"
+
+
+def test_replacing_a_file_does_not_scan_once_per_chunk(tmp_path):
+    """The write cost was quadratic: one full-table DELETE per chunk, because
+    source and chunk are UNINDEXED in FTS5 and have no b-tree behind them."""
+    import time
+
+    index = KeywordIndex(tmp_path / "scale.sqlite3")
+    for batch in range(8):
+        index.upsert_chunks(
+            "c",
+            [
+                {"source": f"/f{batch}.md", "chunk": i, "name": "f.md", "document": f"chunk {batch}-{i} gateway"}
+                for i in range(500)
+            ],
+        )
+
+    start = time.perf_counter()
+    index.upsert_chunks(
+        "c",
+        [{"source": "/f0.md", "chunk": i, "name": "f.md", "document": f"rewritten {i}"} for i in range(500)],
+    )
+    elapsed = time.perf_counter() - start
+
+    assert index.count("c") == 4000, "replacing a file must not duplicate or drop rows"
+    assert elapsed < 2.0, f"replacing 500 rows in a 4,000-row table took {elapsed:.2f}s"
+
+
+def test_an_index_error_degrades_to_vector_search_rather_than_failing_the_answer(tmp_path, monkeypatch):
+    """Keyword search is an enhancement over vector search, not a dependency.
+
+    `keyword_query` called the index with no handling, so a SQLite error — the
+    `database is locked` that SB-F-29 describes — propagated through
+    hybrid_retrieve and ask() to the MCP client as a hard tool error. Losing the
+    keyword half of a hybrid answer is a worse answer; losing the answer is an
+    outage.
+    """
+    import sqlite3
+
+    from secondbrain import hybrid
+
+    class BrokenIndex:
+        def count(self, collection):
+            return 5
+
+        def query(self, collection, query, limit=3):
+            raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(hybrid, "_index", BrokenIndex())
+
+    class Store:
+        collection_name = "c"
+
+        def query(self, qvec, k):
+            return [{"document": "vec", "metadata": {"source": "/v.md", "chunk": 0}, "distance": 0.2}]
+
+        def documents(self):
+            return []
+
+    assert hybrid.keyword_query(Store(), "gateway", limit=3) == []
+
+    hits = hybrid.hybrid_retrieve(Store(), "gateway", [0.1], 5)
+    assert [h["metadata"]["source"] for h in hits] == ["/v.md"], "the answer must survive a broken index"

@@ -81,9 +81,12 @@ def test_hybrid_retrieve_adds_keyword_hits_and_neighbors():
     sources = [hit["metadata"]["source"] for hit in hits]
     kinds = {hit.get("retrieval", "vector") for hit in hits}
     assert len(hits) == 3
-    assert sources.count("syllabus.md") == 2
-    assert "vector.md" in sources
-    assert {"keyword", "keyword-adjacent"} <= kinds
+    # Both retrievers reach the answer. Every slot goes to something that
+    # actually matched: two keyword hits and the vector hit, with no adjacency
+    # padding, because there are three real candidates for three slots.
+    assert set(sources) == {"syllabus.md", "toc.md", "vector.md"}
+    assert {"keyword", "vector"} <= kinds
+    assert "keyword-adjacent" not in kinds
 
 
 class _CappedStore:
@@ -165,3 +168,73 @@ def test_fusion_keeps_hits_both_retrievers_found_over_hits_only_one_found():
     hits = hybrid_retrieve(AgreeingStore(), "agreed", [0.1], 1)
 
     assert [hit["metadata"]["source"] for hit in hits] == ["agreed.md"]
+
+
+def test_real_matches_beat_adjacency_padding_for_the_cap():
+    """Verdict SB-F-27: under a hard cap, padding was what the cap kept.
+
+    Neighbours entered the fused list at retrieved ranks, so a chunk that matched
+    nothing outscored the second real keyword match. At the shipped default an
+    answer was built from one keyword hit, two of its neighbours, and two vector
+    hits — where before the cap it saw five vector hits and three keyword hits.
+    Adjacency is context, not evidence: it fills leftover slots, never takes one
+    from a retriever that actually matched.
+    """
+
+    class Store:
+        collection_name = "padding"
+
+        def query(self, qvec, k):
+            return [
+                {"document": f"vec{i}", "metadata": {"source": f"/v{i}.md", "chunk": 0}, "distance": 0.1 + i / 100}
+                for i in range(5)
+            ]
+
+        def documents(self):
+            return [
+                {"document": f"gateway routing match {i}", "metadata": {"source": f"/k{i}.md", "chunk": 0}, "distance": 1.0}
+                for i in range(3)
+            ]
+
+        def get_source_chunk(self, source, chunk):
+            return {
+                "document": f"neighbour {source}#{chunk}",
+                "metadata": {"source": source, "chunk": chunk},
+                "distance": 1.0,
+            }
+
+    hits = hybrid_retrieve(Store(), "gateway routing", [0.1], 5)
+    kinds = [hit.get("retrieval", "vector") for hit in hits]
+    sources = [hit["metadata"]["source"] for hit in hits]
+
+    assert len(hits) == 5
+    assert "keyword-adjacent" not in kinds, f"padding took a slot from a real match: {list(zip(sources, kinds, strict=True))}"
+    # Every real keyword match survives, and the rest of the budget is vector.
+    assert {"/k0.md", "/k1.md", "/k2.md"} <= set(sources)
+
+
+def test_neighbours_still_fill_slots_the_retrievers_left_empty():
+    """Adjacency is not removed — it is demoted to filling leftover room."""
+
+    class Store:
+        collection_name = "sparse"
+
+        def query(self, qvec, k):
+            return []
+
+        def documents(self):
+            return [{"document": "gateway routing", "metadata": {"source": "/k.md", "chunk": 0}, "distance": 1.0}]
+
+        def get_source_chunk(self, source, chunk):
+            if chunk > 2:
+                return None
+            return {
+                "document": f"neighbour {chunk}",
+                "metadata": {"source": source, "chunk": chunk},
+                "distance": 1.0,
+            }
+
+    hits = hybrid_retrieve(Store(), "gateway routing", [0.1], 5)
+
+    assert [h["metadata"]["source"] for h in hits] == ["/k.md", "/k.md", "/k.md"]
+    assert [h.get("retrieval") for h in hits] == ["keyword", "keyword-adjacent", "keyword-adjacent"]
