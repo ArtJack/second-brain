@@ -19,6 +19,7 @@ from .config import collections_for
 from .evals import DEFAULT_BENCHMARK, load_benchmark, resolve_corpus_paths, run_benchmark, select_cases
 from .gc import GarbageCollectionRefused, collect_garbage
 from .ingest import ingest_paths
+from .keyword_index import rebuild_from_store
 from .intake import PRIVATE_EVAL_DIR, build_private_artifacts, reset_session, run_intake
 from .health import run_health
 from .memory import learn as learn_memory
@@ -607,6 +608,28 @@ def gc(
         if len(res["removed"]) > 20:
             lines.append(f"- ...and {len(res['removed']) - 20} more")
     console.print(Panel("\n".join(lines), title="gc", border_style="green"))
+
+
+@app.command("keyword-reindex")
+def keyword_reindex(
+    corpus: str = typer.Option("personal", "--corpus", help="personal (default), reference, or all"),
+):
+    """Rebuild the keyword index for a collection ingested before it existed.
+
+    Reads the collection once. Without this, keyword search keeps falling back to
+    scanning the whole store on every query until each file happens to change.
+    """
+    targets = [_COLLECTION] if _COLLECTION is not None else collections_for(corpus)
+    lines = []
+    for name in targets:
+        store = Store(collection=name)
+        try:
+            written = rebuild_from_store(store)
+        except Exception as exc:
+            console.print(f"[red]keyword-reindex failed for {name}:[/] {exc}")
+            raise typer.Exit(1) from exc
+        lines.append(f"{name}: {written} chunk(s) indexed")
+    console.print(Panel("\n".join(lines), title="keyword index", border_style="green"))
 
 
 @app.command()
