@@ -10,6 +10,10 @@ cd "$PROJECT_DIR"
 
 uv run sb project-context --no-ingest
 uv run sb overnight
+# After ingesting, drop chunks whose source file has gone. `gc` exits 2 when it
+# refuses (an unmounted share, or an implausible share of the corpus missing),
+# which is a decision to report, not a failure that should abort the night.
+uv run sb gc || true
 uv run sb task-sync
 uv run sb health
 uv run sb morning
