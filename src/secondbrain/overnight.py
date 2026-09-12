@@ -50,6 +50,12 @@ DEFAULT_CONFIG = {
         # from a note the owner actually wrote.
         "evals/corpus",
         "evals/corpus-hard",
+        # The benchmark definitions carry the same invented claims as the
+        # corpora they score, and in a worse shape: each fabricated fact sits
+        # directly beside a verbatim copy of the question it answers.
+        "evals/hard.json",
+        "evals/regression.json",
+        "evals/retrieval.json",
         ".pytest_cache",
         ".vercel",
         "dist",
@@ -350,6 +356,13 @@ def scan_targets(config: dict[str, Any]) -> ScanResult:
 
     def consider(path: Path, collection: str | None) -> None:
         if path.suffix.lower() not in SUPPORTED:
+            return
+        # Asked against the *full* path, so a rule may name a file
+        # (`evals/hard.json`) as well as a directory. Directory pruning above
+        # cannot catch a file rule, and a directory rule matches either way.
+        named = excluded_dir_rule(path.parts, skip_dirs)
+        if named:
+            skipped.append({"path": str(path), "rule": named})
             return
         if _is_foreign_memory(path):
             skipped.append({"path": str(path), "rule": "memory for another collection"})
