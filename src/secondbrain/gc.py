@@ -112,7 +112,8 @@ def _excluding_rule(path: Path, rules: dict) -> str | None:
             return rule
     from .overnight import excluded_dir_rule
 
-    rule = excluded_dir_rule(path.parts[:-1], _rule_list(rules, "exclude_dirs"))
+    # Full parts, not just the directories: a rule may name a file now.
+    rule = excluded_dir_rule(path.parts, _rule_list(rules, "exclude_dirs"))
     return f"dir:{rule}" if rule else None
 
 
