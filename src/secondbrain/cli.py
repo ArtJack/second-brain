@@ -606,11 +606,22 @@ def browser_check(
 @app.command()
 def gc(
     dry_run: bool = typer.Option(False, "--dry-run", help="Report what would be removed, delete nothing"),
-    force: bool = typer.Option(False, "--force", help="Proceed even if most sources look missing"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Skip the majority guard entirely — including for rule removals, where it is the guard that catches a typo",
+    ),
+    enforce_rules: bool = typer.Option(
+        False,
+        "--enforce-rules",
+        help="Also remove sources the scan's current exclusion rules would reject",
+    ),
 ):
-    """Remove chunks whose source file no longer exists."""
+    """Remove chunks whose source file is gone, or which the scan rules now exclude."""
     try:
-        res = collect_garbage(collection=_COLLECTION, dry_run=dry_run, force=force)
+        res = collect_garbage(
+            collection=_COLLECTION, dry_run=dry_run, force=force, enforce_rules=enforce_rules
+        )
     except GarbageCollectionRefused as exc:
         console.print(f"[yellow]gc refused:[/] {exc}")
         raise typer.Exit(2) from exc
@@ -623,6 +634,12 @@ def gc(
         f"kept      : {res['kept_sources']} source(s)",
         f"skipped   : {res['skipped_sources']} relative source(s)",
     ]
+    if res["excluded_sources"]:
+        verb = "excluded  " if res["excluded_enforced"] else "excludable"
+        lines.append(
+            f"{verb}: {res['excluded_sources']} source(s), {res['excluded_chunks']} chunk(s) "
+            "matching the scan's exclusion rules"
+        )
     if res["removed"]:
         lines.append("")
         lines.append("Removed sources:" if not res["dry_run"] else "Would remove:")
@@ -630,6 +647,21 @@ def gc(
             lines.append(f"- {source}")
         if len(res["removed"]) > 20:
             lines.append(f"- ...and {len(res['removed']) - 20} more")
+    if res["excluded_by_rule"]:
+        lines.append("")
+        if res["excluded_enforced"]:
+            lines.append("Removed as excluded:" if not res["dry_run"] else "Would remove as excluded:")
+        else:
+            # Naming the flag here is the whole point: the corpus is holding
+            # material the owner has already written a rule against, and without
+            # this line nothing would ever tell them so.
+            lines.append("In the corpus but excluded by a current rule (--enforce-rules removes):")
+        for source, rule in list(res["excluded_by_rule"].items())[:20]:
+            # No square brackets: rich reads them as markup and silently ate the
+            # rule name, which is the one piece of information this line carries.
+            lines.append(f"- {source}  (rule: {rule})")
+        if len(res["excluded_by_rule"]) > 20:
+            lines.append(f"- ...and {len(res['excluded_by_rule']) - 20} more")
     console.print(Panel("\n".join(lines), title="gc", border_style="green"))
 
 
