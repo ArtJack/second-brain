@@ -22,6 +22,7 @@ from pathlib import Path
 
 from secondbrain.config import cfg
 from secondbrain.ingest import ingest_paths
+from secondbrain.keyword_index import KeywordIndex
 from secondbrain.store import Store
 
 
@@ -37,11 +38,11 @@ def plan(root: Path) -> dict:
     return {"sources": sources, "chunks": sum(sources.values())}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("root", type=Path, help="Directory of reference material to move")
     parser.add_argument("--apply", action="store_true", help="Actually write and delete (default: dry run)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     root = args.root.expanduser()
     if not root.is_dir():
@@ -81,8 +82,14 @@ def main() -> int:
     # Only now is it safe to remove the originals.
     print("\nremoving those sources from the personal collection...")
     personal = Store(collection=cfg.collection)
+    # The keyword index is a second copy of the same corpus. Removing a source
+    # from only one of them leaves keyword search still returning the material
+    # this script exists to move out — with a `second_brain` citation for a
+    # document that now lives in `second_brain_reference`. (Verdict SB-F-25.)
+    index = KeywordIndex()
     for source in before["sources"]:
         personal.delete_source(source)
+        index.delete_source(cfg.collection, source)
 
     after_personal = personal.count()
     after_reference = reference.count()
