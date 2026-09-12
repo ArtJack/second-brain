@@ -67,6 +67,11 @@ def _require_fts5() -> None:
         ) from exc
 
 
+# The shape a table must have to be usable. A table that does not match is from
+# an older version and is dropped rather than written to.
+_COLUMNS = ("source", "chunk", "name", "header", "document")
+
+
 def _table(collection: str) -> str:
     """A collection name as a safe table identifier."""
     return "kw_" + re.sub(r"\W+", "_", collection)
@@ -100,13 +105,30 @@ class KeywordIndex:
     def _ensure(self, conn: sqlite3.Connection, collection: str) -> str:
         table = _table(collection)
         if table not in self._known:
+            # `IF NOT EXISTS` keeps whatever is already on disk, so a table built
+            # by an older version stays at its old column count and every insert
+            # raises. The index is a derived cache with `rebuild_from_store` to
+            # repopulate it, so the honest move is to drop a table whose shape no
+            # longer matches and let the next ingest or reindex refill it —
+            # rather than fail at 03:15 on the deployed machine.
+            if self._columns(conn, table) not in (None, _COLUMNS):
+                conn.execute(f"DROP TABLE {table}")
             conn.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS {table} USING fts5("
-                "source UNINDEXED, chunk UNINDEXED, name UNINDEXED, document, "
+                "source UNINDEXED, chunk UNINDEXED, name UNINDEXED, header, document, "
                 "tokenize='unicode61 remove_diacritics 2')"
             )
             self._known.add(table)
         return table
+
+    def _columns(self, conn: sqlite3.Connection, table: str) -> tuple[str, ...] | None:
+        """The existing table's columns, or None if it does not exist."""
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+        ).fetchone()
+        if not row:
+            return None
+        return tuple(info[1] for info in conn.execute(f"PRAGMA table_info({table})"))
 
     def _exists(self, conn: sqlite3.Connection, collection: str) -> str | None:
         table = _table(collection)
@@ -138,9 +160,15 @@ class KeywordIndex:
                 for source in dict.fromkeys(row["source"] for row in rows):
                     conn.execute(f"DELETE FROM {table} WHERE source = ?", (source,))
             conn.executemany(
-                f"INSERT INTO {table} (source, chunk, name, document) VALUES (?, ?, ?, ?)",
+                f"INSERT INTO {table} (source, chunk, name, header, document) VALUES (?, ?, ?, ?, ?)",
                 [
-                    (row["source"], row["chunk"], row.get("name", ""), row.get("document", ""))
+                    (
+                        row["source"],
+                        row["chunk"],
+                        row.get("name", ""),
+                        row.get("header", ""),
+                        row.get("document", ""),
+                    )
                     for row in rows
                 ],
             )
@@ -180,7 +208,7 @@ class KeywordIndex:
             if not table:
                 return []
             rows = conn.execute(
-                f"SELECT source, chunk, name, document, bm25({table}) AS score "
+                f"SELECT source, chunk, name, header, document, bm25({table}) AS score "
                 f"FROM {table} WHERE {table} MATCH ? ORDER BY score LIMIT ?",
                 (match, limit),
             ).fetchall()
@@ -191,8 +219,15 @@ class KeywordIndex:
             relevance = -float(row["score"])
             hits.append(
                 {
+                    # The body only. The header is a retrieval aid: it is matched
+                    # against, and it is not part of what a citation quotes.
                     "document": row["document"],
-                    "metadata": {"source": row["source"], "chunk": row["chunk"], "name": row["name"]},
+                    "metadata": {
+                        "source": row["source"],
+                        "chunk": row["chunk"],
+                        "name": row["name"],
+                        "header": row["header"],
+                    },
                     "distance": 1 / (1 + relevance) if relevance > 0 else 1.0,
                     "retrieval": "keyword",
                 }
@@ -228,6 +263,7 @@ def rebuild_from_store(store, index: KeywordIndex | None = None, batch_size: int
                 "source": source,
                 "chunk": meta.get("chunk", 0),
                 "name": meta.get("name", str(source).rsplit("/", 1)[-1]),
+                "header": meta.get("header", ""),
                 "document": hit.get("document", ""),
             }
         )
