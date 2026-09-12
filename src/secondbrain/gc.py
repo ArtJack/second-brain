@@ -24,22 +24,54 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .keyword_index import KeywordIndex
 from .store import Store
 
 # Above this share of sources, refuse and make the caller say --force.
 REFUSAL_THRESHOLD = 0.5
+
+# Where removable volumes appear. A path under one of these is only believed to
+# be missing if its volume is genuinely mounted.
+_VOLUME_PARENTS = ("/Volumes",)
+
+# Deleting from the store alone leaves keyword search still serving the dead
+# citations this module exists to remove.
+_index = KeywordIndex()
 
 
 class GarbageCollectionRefused(RuntimeError):
     """Raised when the evidence for deleting looks more like a mistake than a fact."""
 
 
+def _is_mounted(path: Path) -> bool:
+    try:
+        return path.is_mount()
+    except OSError:
+        # A hung mount can raise rather than answer. Unreachable either way.
+        return False
+
+
 def _unreachable_volume(path: Path) -> str | None:
-    """The volume root this path needs, if that root is not currently present."""
-    parts = path.parts
-    if len(parts) >= 3 and parts[1] == "Volumes":
-        volume = Path(parts[0], parts[1], parts[2])
-        if not volume.exists():
+    """The volume root this path needs, if that volume is not currently mounted.
+
+    The question is whether the *volume* is there, not whether its mount point
+    directory is. Asking the second was the defect: a tailnet drop leaves
+    `/Volumes/DISK` in place as an empty directory, so the guard saw a directory,
+    concluded the disk was present, and read every file under it as deleted —
+    the precise failure this guard exists to prevent, and the one it could not
+    see. `is_mount()` distinguishes them: a live share answers True, a leftover
+    mount point answers False.
+    """
+    for parent in _VOLUME_PARENTS:
+        parent_path = Path(parent)
+        try:
+            relative = path.relative_to(parent_path)
+        except ValueError:
+            continue
+        if not relative.parts:
+            continue
+        volume = parent_path / relative.parts[0]
+        if not volume.exists() or not _is_mounted(volume):
             return str(volume)
     return None
 
@@ -93,8 +125,14 @@ def collect_garbage(
             )
 
     if not dry_run:
+        collection = getattr(store, "collection_name", None)
         for source in missing:
             store.delete_source(source)
+            # The keyword index is a second copy of the same corpus. Removing a
+            # source from only one of them leaves keyword search returning the
+            # dead citation this sweep just removed.
+            if collection:
+                _index.delete_source(collection, source)
 
     return {
         "removed_sources": len(missing),

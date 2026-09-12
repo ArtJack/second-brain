@@ -138,3 +138,74 @@ def test_the_real_stores_can_report_their_sources(tmp_path):
     store.delete_source("/a/one.md")
 
     assert store.sources() == {"/b/two.md": 1}
+
+
+def test_a_mount_point_that_exists_but_is_not_mounted_aborts(tmp_path, monkeypatch):
+    """Verdict SB-F-26, Major: the guard asked the wrong question.
+
+    It tested whether the mount *point* directory exists. A tailnet drop — the
+    exact failure this module was written to survive — leaves /Volumes/DISK in
+    place as an empty directory, so the guard saw a directory, believed the disk
+    was there, and read every memory file under it as deleted. Whether they were
+    then destroyed came down to the unrelated 50% threshold.
+
+    The original test used a root that did not exist at all, so it never posed
+    the distinction between "root absent" and "root present but not mounted".
+    """
+    import secondbrain.gc as gc_module
+
+    present = tmp_path / "kept.md"
+    present.write_text("still here")
+    # A real directory that is not a mount point, standing in for a share whose
+    # tailnet went away.
+    stale_mount = tmp_path / "Volumes" / "DISK"
+    stale_mount.mkdir(parents=True)
+    monkeypatch.setattr(gc_module, "_VOLUME_PARENTS", (str(tmp_path / "Volumes"),))
+
+    store = FakeStore([str(present), str(stale_mount / "artjeck" / "memory" / "a-memory.md")])
+
+    with pytest.raises(GarbageCollectionRefused) as excinfo:
+        collect_garbage(store=store)
+
+    assert store.deleted == []
+    assert "DISK" in str(excinfo.value)
+
+
+def test_a_genuinely_mounted_volume_does_not_block_the_sweep(tmp_path, monkeypatch):
+    """The guard must not make gc unusable whenever a share is involved."""
+    import secondbrain.gc as gc_module
+
+    present = tmp_path / "kept.md"
+    present.write_text("still here")
+    monkeypatch.setattr(gc_module, "_VOLUME_PARENTS", (str(tmp_path / "Volumes"),))
+    monkeypatch.setattr(gc_module, "_is_mounted", lambda path: True)
+
+    gone = tmp_path / "Volumes" / "DISK" / "deleted-note.md"
+    gone.parent.mkdir(parents=True)
+    store = FakeStore([str(present), str(gone)])
+
+    result = collect_garbage(store=store)
+
+    assert result["removed_sources"] == 1
+    assert store.deleted == [str(gone)]
+
+
+def test_gc_removes_the_keyword_rows_too(tmp_path, monkeypatch):
+    """Verdict SB-F-25: deleting from the store alone leaves keyword search
+    serving the dead citations gc exists to remove."""
+    import secondbrain.gc as gc_module
+
+    present = tmp_path / "kept.md"
+    present.write_text("still here")
+    gone = tmp_path / "deleted.md"
+    store = FakeStore([str(present), str(gone)])
+    store.collection_name = "c"
+
+    dropped: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        gc_module._index, "delete_source", lambda collection, source: dropped.append((collection, source))
+    )
+
+    collect_garbage(store=store)
+
+    assert dropped == [("c", str(gone))]
