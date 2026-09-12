@@ -34,7 +34,16 @@ SKIP_DIRS = {".venv", "node_modules", ".git", "__pycache__", ".next"}
 # is not on this list and must not come back: it does not fall back, it deletes the
 # bytes it cannot read and hands on the wreckage, which then gets embedded and
 # cited as though it were what the owner wrote.
-_ENCODINGS = ("utf-8", "utf-16", "cp1252", "latin-1")
+#
+# UTF-16 is deliberately NOT in this ladder. It decodes almost any byte sequence
+# of even length without error, so trying it speculatively turned roughly half of
+# all Latin-1 notes into CJK mojibake — "Über den Wolken" became 拜牥搠湥圠汯敫确 —
+# which was then embedded and cited as the owner's own words. It is attempted only
+# when a byte-order mark says the file really is UTF-16. The first version of this
+# ladder shipped with the bug and its test passed only because the sample string
+# happened to be an odd number of bytes.
+_ENCODINGS = ("utf-8", "cp1252", "latin-1")
+_UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
 
 _report: dict[str, list[dict[str, str]]] = {"skipped": []}
 
@@ -87,17 +96,26 @@ def read_file(path: Path) -> str:
         reader = PdfReader(str(path))
         return "\n\n".join((page.extract_text() or "") for page in reader.pages)
     raw = path.read_bytes()
+    attempted = []
+    if raw[:2] in _UTF16_BOMS:
+        attempted.append("utf-16")
+        try:
+            return raw.decode("utf-16")
+        except (UnicodeDecodeError, UnicodeError):
+            pass
     for encoding in _ENCODINGS:
+        attempted.append(encoding)
         try:
             text = raw.decode(encoding)
         except (UnicodeDecodeError, UnicodeError):
             continue
-        # A successful cp1252/latin-1 decode of UTF-16 leaves interleaved NULs;
-        # they are not text, and a chunk of them is worse than no chunk at all.
+        # A single-byte decode of UTF-16 that slipped past the BOM check leaves
+        # interleaved NULs. They are not text, and a chunk of them is worse than
+        # no chunk at all.
         if "\x00" in text:
             continue
         return text
-    raise ValueError(f"cannot decode {path} as any of: {', '.join(_ENCODINGS)}")
+    raise ValueError(f"cannot decode {path} as any of: {', '.join(attempted)}")
 
 
 def _is_skipped_dir(path: Path, own_data: Path) -> str | None:
