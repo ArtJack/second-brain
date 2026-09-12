@@ -38,7 +38,10 @@ def test_run_health_writes_report_with_patched_checks(tmp_path, monkeypatch):
     monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [HealthCheck("ollama", "pass", "ok")])
     monkeypatch.setattr(health, "_project_checks", lambda timeout_s: [HealthCheck("project app", "skip", "no command")])
 
-    res = run_health(output_dir=tmp_path)
+    # include_projects is opt-in now; this test is about report assembly, so it
+    # asks for both groups. That the nightly does NOT ask is pinned separately
+    # in tests/test_health_scope.py.
+    res = run_health(output_dir=tmp_path, include_projects=True)
 
     assert res["passed"] == 1
     assert res["skipped"] == 1
