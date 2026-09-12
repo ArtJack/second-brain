@@ -42,7 +42,7 @@ Selected by `SB_MCP_TRANSPORT`:
 Already wired: the repo ships a project-scoped `.mcp.json`. Just run Claude Code in the repo:
 
 ```bash
-cd ~/Projects/AI/projects/second-brain
+cd ~/Projects/second-brain
 claude        # the "second-brain" MCP server is auto-loaded
 ```
 
@@ -58,7 +58,7 @@ as above — the MCP server runs on the host, the other device is just the termi
 
 ```bash
 ssh <host-over-tailscale>
-cd ~/Projects/AI/projects/second-brain && claude
+cd ~/Projects/second-brain && claude
 ```
 
 ## 3. Claude Desktop (any Mac) — stdio
