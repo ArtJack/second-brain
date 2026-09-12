@@ -5,7 +5,9 @@ simple, robust, and easy to explain. (Semantic/recursive chunking is a documente
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import cfg
@@ -65,11 +67,14 @@ def _own_data_dir() -> Path:
     return cfg.state_db.parent.resolve()
 
 
-def chunk_text(text: str, size: int, overlap: int) -> list[str]:
-    text = text.strip()
-    if not text:
-        return []
-    chunks: list[str] = []
+def _chunk_spans(text: str, size: int, overlap: int) -> list[tuple[int, int]]:
+    """The windows `chunk_text` cuts, as offsets into the stripped text.
+
+    Split out so the header logic can ask *where* a chunk came from. The
+    arithmetic is unchanged and `chunk_text` is now a projection of this, which
+    is what keeps the bodies byte-identical to what shipped before.
+    """
+    spans: list[tuple[int, int]] = []
     start, n = 0, len(text)
     while start < n:
         end = min(start + size, n)
@@ -79,22 +84,146 @@ def chunk_text(text: str, size: int, overlap: int) -> list[str]:
                 cut = text.rfind(" ", start + size - overlap, end)
             if cut > start:
                 end = cut
-        piece = text[start:end].strip()
-        if piece:
-            chunks.append(piece)
+        spans.append((start, end))
         if end >= n:
             break
         start = max(end - overlap, start + 1)
+    return spans
+
+
+def chunk_text(text: str, size: int, overlap: int) -> list[str]:
+    text = text.strip()
+    if not text:
+        return []
+    pieces = (text[start:end].strip() for start, end in _chunk_spans(text, size, overlap))
+    return [piece for piece in pieces if piece]
+
+
+# ATX headings only, and only H1 through H3. A `#####` is too fine to orient
+# anyone, and a `#` is the document's title rather than a section within it.
+_HEADING = re.compile(r"^(#{1,3})[ \t]+(\S.*?)[ \t]*#*$", re.MULTILINE)
+_FENCE = re.compile(r"^[ \t]*(```|~~~)", re.MULTILINE)
+
+
+def _fenced_ranges(text: str) -> list[tuple[int, int]]:
+    """Character ranges inside fenced code blocks.
+
+    `# comment` at the start of a line in a shell block is a comment, and
+    treating it as a heading put "not a heading" on real chunks.
+    """
+    ranges: list[tuple[int, int]] = []
+    opening: int | None = None
+    for match in _FENCE.finditer(text):
+        if opening is None:
+            opening = match.start()
+        else:
+            ranges.append((opening, match.end()))
+            opening = None
+    if opening is not None:  # an unclosed fence swallows the rest of the file
+        ranges.append((opening, len(text)))
+    return ranges
+
+
+@dataclass(frozen=True)
+class DocumentChunk:
+    """One chunk, plus where in its document it came from.
+
+    `body` is the source text a citation quotes. `embedded` is what retrieval
+    sees: the header and the body. They are deliberately different — the header
+    orients the retriever and the model, and putting it in the quoted text would
+    mean citing words the owner never wrote.
+    """
+
+    body: str
+    title: str
+    section: str | None
+    page: int | None
+
+    @property
+    def header(self) -> str:
+        return f"{self.title} › {self.section}" if self.section else self.title
+
+    @property
+    def embedded(self) -> str:
+        return f"{self.header}\n\n{self.body}"
+
+
+def chunk_document(
+    text: str,
+    size: int,
+    overlap: int,
+    *,
+    name: str,
+    page_starts: list[int] | None = None,
+) -> list[DocumentChunk]:
+    """Chunks carrying the title and section they sit under."""
+    stripped = text.strip()
+    if not stripped:
+        return []
+    offset = text.index(stripped[0]) if stripped else 0
+
+    fenced = _fenced_ranges(stripped)
+
+    def in_code(position: int) -> bool:
+        return any(start <= position < end for start, end in fenced)
+
+    headings = [
+        (match.start(), len(match.group(1)), match.group(2).strip())
+        for match in _HEADING.finditer(stripped)
+        if not in_code(match.start())
+    ]
+    title = next((text for _, level, text in headings if level == 1), None) or Path(name).stem
+    sections = [(position, text) for position, level, text in headings if level in (2, 3)]
+
+    chunks: list[DocumentChunk] = []
+    for start, end in _chunk_spans(stripped, size, overlap):
+        body = stripped[start:end].strip()
+        if not body:
+            continue
+        # Two cases, and the first document ever tested got the second one.
+        # A chunk that *follows* headings belongs to the last one before it —
+        # that is the section it opens in. A chunk that starts before any
+        # heading, which includes the common case of a short document arriving
+        # whole, belongs to the first heading it actually contains. Asking only
+        # the first question labelled every such document with no section at all.
+        section = next((t for position, t in reversed(sections) if position <= start), None)
+        if section is None:
+            section = next((t for position, t in sections if start < position < end), None)
+        page = None
+        if page_starts:
+            # Offsets are into the original text; the spans are into the
+            # stripped copy, so the leading whitespace has to be added back.
+            absolute = start + offset
+            page = sum(1 for boundary in page_starts if boundary <= absolute) or 1
+        chunks.append(DocumentChunk(body=body, title=title, section=section, page=page))
     return chunks
+
+
+def read_pages(path: Path) -> tuple[str, list[int]]:
+    """A PDF's text plus the offset each page starts at.
+
+    Same joined text `read_file` has always produced; the offsets are what lets
+    a chunk say which page it came from, so a citation into a 200-page document
+    points somewhere a person can actually turn to.
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(path))
+    starts: list[int] = []
+    parts: list[str] = []
+    position = 0
+    for page in reader.pages:
+        starts.append(position)
+        text = page.extract_text() or ""
+        parts.append(text)
+        position += len(text) + 2  # the "\n\n" the join inserts
+    return "\n\n".join(parts), starts
 
 
 def read_file(path: Path) -> str:
     """Text from a file, decoded honestly or not at all."""
     if path.suffix.lower() == ".pdf":
-        from pypdf import PdfReader
-
-        reader = PdfReader(str(path))
-        return "\n\n".join((page.extract_text() or "") for page in reader.pages)
+        return read_pages(path)[0]
     raw = path.read_bytes()
     attempted = []
     if raw[:2] in _UTF16_BOMS:
@@ -166,13 +295,19 @@ def ingest_paths(path: str | Path, reset: bool = False, collection: str | None =
         store.reset()
         _index.reset(index_name)
     for f in discover(path):
+        page_starts: list[int] | None = None
         try:
-            text = read_file(f)
+            if f.suffix.lower() == ".pdf":
+                text, page_starts = read_pages(f)
+            else:
+                text = read_file(f)
         except ValueError as exc:
             # One unreadable file must not end the run, but it must not vanish either.
             _note_skip(f, f"undecodable: {exc}")
             continue
-        chunks = chunk_text(text, cfg.chunk_size, cfg.chunk_overlap)
+        chunks = chunk_document(
+            text, cfg.chunk_size, cfg.chunk_overlap, name=f.name, page_starts=page_starts
+        )
         src = str(f)
         # Replace any earlier ingest of this file. Without this, editing a file so it
         # produces *fewer* chunks would leave the old higher-index chunks behind as
@@ -184,12 +319,40 @@ def ingest_paths(path: str | Path, reset: bool = False, collection: str | None =
             _note_skip(f, "no-content")
             continue
         ids = [f"{src}#{i}" for i in range(len(chunks))]
-        metadatas = [{"source": src, "name": f.name, "chunk": i} for i in range(len(chunks))]
-        store.upsert(ids=ids, embeddings=embed(chunks), documents=chunks, metadatas=metadatas)
+        metadatas = []
+        for i, chunk in enumerate(chunks):
+            meta = {
+                "source": src,
+                "name": f.name,
+                "chunk": i,
+                "title": chunk.title,
+                "header": chunk.header,
+            }
+            if chunk.section:
+                meta["section"] = chunk.section
+            if chunk.page:
+                meta["page"] = chunk.page
+            metadatas.append(meta)
+        # Embedded with the header, stored without it. Retrieval matches the
+        # document title and section as well as the body, which is how a chunk
+        # reading "stop the launchd job" becomes findable as a *gateway*
+        # instruction. The citation still quotes only what the owner wrote.
+        store.upsert(
+            ids=ids,
+            embeddings=embed([chunk.embedded for chunk in chunks]),
+            documents=[chunk.body for chunk in chunks],
+            metadatas=metadatas,
+        )
         _index.upsert_chunks(
             index_name,
             [
-                {"source": src, "chunk": i, "name": f.name, "document": chunk}
+                {
+                    "source": src,
+                    "chunk": i,
+                    "name": f.name,
+                    "header": chunk.header,
+                    "document": chunk.body,
+                }
                 for i, chunk in enumerate(chunks)
             ],
         )

@@ -1,5 +1,108 @@
 # second-brain eval results
 
+## 2026-09-12 — contextual chunk headers
+
+Each chunk is now embedded and keyword-indexed with a header line naming its
+document and the section it sits under — `Gateway runbook › Restarting` — while
+the stored body, and therefore anything a citation quotes, is unchanged. The
+chunk bodies are byte-identical to what shipped before, which a test pins: this
+adds orientation, it does not re-cut the document.
+
+Measured on both benchmarks, same machine, k=5, `SB_HYBRID=1`, Qdrant, corpora
+re-ingested for each reading.
+
+| metric | hard before | hard after | regression before | regression after |
+|---|---:|---:|---:|---:|
+| passed / cases | 14 / 18 | 14 / 18 | 22 / 22 | 22 / 22 |
+| hit_rate | 77.8% | 77.8% | 100% | 100% |
+| source_recall | 100% | 100% | 100% | 100% |
+| mrr | 0.852 | **0.870** | 1.000 | 1.000 |
+| mean_precision | 28.9% | **31.1%** | 47.3% | 47.3% |
+| passage_recall | 100% | 100% | not asked | not asked |
+| distractor_rate | 100% | 100% | not asked | not asked |
+
+A small, real gain on the hard set and no movement on the saturated one, which
+is what the gate asked for. The honest reading is that this is a modest change:
+ranking improved slightly and nothing regressed.
+
+**It did not touch the distractor problem, and there is a reason worth writing
+down.** The superseded document's own H1 is "QA routing (SUPERSEDED — kept as
+the record of what it used to be)", so every one of its chunks now carries the
+word SUPERSEDED into both the embedding and the keyword index. The signal is
+present in the index for the first time. Nothing reads it. A demotion rule for
+documents that declare themselves superseded is the obvious next step, and it is
+deliberately not in this change: it is a ranking change and it deserves its own
+before-and-after rather than being folded into a chunking one.
+
+This change alters embeddings, so it is a re-ingest, not an in-place migration.
+The keyword index gains a `header` column; a table built on the older schema is
+dropped and refilled by the next ingest or by `sb keyword-reindex` rather than
+failing on insert.
+
+## 2026-09-12 — a benchmark that can fail: passage recall, precision, distractors
+
+The regression set has scored 1.0 on every metric since it was written, which is
+a finding about the benchmark rather than about retrieval. Two real defects
+passed straight through it this week: a prompt change that cost two answer
+cases, and a backfill bug that truncated the keyword index to the first chunks
+of every long file. Neither moved a number.
+
+Three things were wrong with how it scored.
+
+**It scored files, not passages.** A case passed when any chunk of the right
+document came back. A document of 331 chunks scores a hit on chunk 0, so the
+truncation bug was invisible by construction. Cases may now name
+`expected_chunk_contains`: the phrase that actually answers the question has to
+appear in a chunk the reader will see.
+
+**Nothing cost anything for being wrong.** Precision was not merely unmeasured,
+it was unmeasurable, because no case declared what a wrong answer looked like.
+Cases may now name `forbidden_sources`, the near-miss documents they must not
+surface, and the summary reports precision and a distractor rate over the cases
+that named them.
+
+**The corpus was eight files of about 400 bytes.** Each question mapped to an
+obviously distinct document and there were no near misses to get wrong.
+
+`evals/hard.json` is the replacement: 20 documents, 20 cases, each targeting one
+specific way retrieval goes wrong — an answer far from the top of a long file, a
+near-miss sharing the query's vocabulary, a superseded document that still reads
+as authoritative, a query whose words appear nowhere in the answer, a rare
+identifier with no semantic neighbours, and non-ASCII text. The benchmark's own
+correctness is tested offline: a typo in a `forbidden_sources` path would name a
+document that can never be retrieved, so the case would pass every time while
+measuring nothing.
+
+Both benchmarks, same machine, same day, k=5, `SB_HYBRID=1`, Qdrant:
+
+| metric | regression (old) | hard (new) |
+|---|---:|---:|
+| retrieval_passed / cases | 22 / 22 | 14 / 18 |
+| retrieval_hit_rate | 100% | 77.8% |
+| mean_source_recall | 100% | 100% |
+| mrr | 1.000 | 0.852 |
+| mean_precision | 47.3% | 28.9% |
+| mean_passage_recall | not asked | 100% |
+| distractor_rate | not asked | 100% |
+
+**The headline is the distractor rate.** All four cases that named a near-miss
+document retrieved it, out of a corpus of twenty. Retrieval has no notion of
+supersession or recency: asked which agent owns QA, it returns the current
+routing document *and* the one marked "SUPERSEDED — do not action anything in
+this file", and the answer is then built from both. Asked for the offsite backup
+time it returns the local snapshot policy alongside. Source recall stays at
+100%, so every older metric says this is working perfectly.
+
+That is now a measured, reproducible number to drive down rather than a
+suspicion. It is not yet fixed, and no change in this session was made to chase
+it.
+
+Two secondary readings. Precision at 47.3% on the *old* benchmark says more than
+half of every answer's context is documents no case asked for; the old summary
+line could not show that either. And passage recall at 100% on the hard set is
+genuine good news: when the right document is retrieved, the chunk holding the
+answer comes with it.
+
 ## 2026-09-12 — persisted keyword index, RRF fusion, `limit` as a cap
 
 Benchmark: `evals/regression.json`, 26 cases against the throwaway

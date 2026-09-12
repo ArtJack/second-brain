@@ -7,6 +7,7 @@ cheap local checks depend on another model call.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -155,8 +156,25 @@ def _round_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 2)
 
 
+_WHITESPACE = re.compile(r"\s+")
+
+
+def _flattened(text: str) -> str:
+    """Lowercased with runs of whitespace collapsed, so a phrase survives wrapping."""
+    return _WHITESPACE.sub(" ", str(text)).strip().lower()
+
+
 def _retrieval_result(case: dict, hits: list[dict], duration_ms: float) -> dict:
     expected_sources = case.get("expected_sources") or []
+    # The phrase that actually answers the question, which is a different claim
+    # from "the right file came back". A file of 331 chunks scores a source hit
+    # on chunk 0; only this can tell whether the answering passage was among the
+    # chunks the reader will see.
+    expected_passages = case.get("expected_chunk_contains") or []
+    # Near-miss documents this case must not surface. Without them nothing costs
+    # anything for filling the top-k with plausible wrong answers, so precision
+    # is not merely unmeasured, it is unmeasurable.
+    forbidden = case.get("forbidden_sources") or []
     sources = [str(hit.get("metadata", {}).get("source", "?")) for hit in hits]
     if case.get("expect_abstain"):
         return {
@@ -165,6 +183,11 @@ def _retrieval_result(case: dict, hits: list[dict], duration_ms: float) -> dict:
             "expected_sources": [],
             "matched_expected_sources": [],
             "source_recall": None,
+            "passage_recall": None,
+            "missing_passages": [],
+            "declared_forbidden": [],
+            "retrieved_forbidden": [],
+            "precision": None,
             "first_relevant_rank": None,
             "reciprocal_rank": None,
             "retrieved_sources": sources,
@@ -178,13 +201,39 @@ def _retrieval_result(case: dict, hits: list[dict], duration_ms: float) -> dict:
         )
     matched = [source for source, rank in ranks.items() if rank is not None]
     first_rank = min((rank for rank in ranks.values() if rank is not None), default=None)
-    recall = len(matched) / len(expected_sources)
+    recall = len(matched) / len(expected_sources) if expected_sources else 1.0
+
+    documents = [_flattened(hit.get("document", "")) for hit in hits]
+    missing_passages = [
+        phrase for phrase in expected_passages
+        if not any(_flattened(phrase) in document for document in documents)
+    ]
+    passage_recall = (
+        None if not expected_passages
+        else round((len(expected_passages) - len(missing_passages)) / len(expected_passages), 4)
+    )
+    retrieved_forbidden = [
+        rule for rule in forbidden if any(source_matches(source, rule) for source in sources)
+    ]
+    relevant_slots = sum(
+        1 for source in sources if any(source_matches(source, e) for e in expected_sources)
+    )
+    precision = round(relevant_slots / len(sources), 4) if sources else 0.0
+
     return {
         "scored": True,
-        "passed": recall == 1.0,
+        # Three separate ways to be wrong, and a case has to survive all of
+        # them: the right files, the answering passage, and no document the
+        # case named as a near miss.
+        "passed": recall == 1.0 and not missing_passages and not retrieved_forbidden,
         "expected_sources": expected_sources,
         "matched_expected_sources": matched,
         "source_recall": round(recall, 4),
+        "passage_recall": passage_recall,
+        "missing_passages": missing_passages,
+        "declared_forbidden": forbidden,
+        "retrieved_forbidden": retrieved_forbidden,
+        "precision": precision,
         "first_relevant_rank": first_rank,
         "reciprocal_rank": round(1 / first_rank, 4) if first_rank else 0.0,
         "retrieved_sources": sources,
@@ -383,6 +432,21 @@ def run_benchmark(
     retrieval_passed = sum(1 for case in retrieval_cases if case["retrieval"]["passed"])
     source_recalls = [case["retrieval"]["source_recall"] for case in retrieval_cases]
     reciprocal_ranks = [case["retrieval"]["reciprocal_rank"] for case in retrieval_cases]
+    # Only over the cases that named passages — a mean that silently counts
+    # every source-only case as 1.0 is the saturation this metric exists to end.
+    passage_recalls = [
+        case["retrieval"]["passage_recall"]
+        for case in retrieval_cases
+        if case["retrieval"]["passage_recall"] is not None
+    ]
+    precisions = [case["retrieval"]["precision"] for case in retrieval_cases]
+    # Denominator is the cases that actually named near misses, not every case.
+    # Spread over the whole suite the number only shrinks as the suite grows:
+    # five distracted cases out of ten that name distractors is 50% and worth
+    # acting on, and the same five out of a hundred total cases is 5% and reads
+    # like noise.
+    distractor_cases = [case for case in retrieval_cases if case["retrieval"]["declared_forbidden"]]
+    distracted = [case for case in distractor_cases if case["retrieval"]["retrieved_forbidden"]]
     answer_passed = (
         sum(1 for case in case_results if case["answer"]["passed"]) if include_answers else None
     )
@@ -429,6 +493,13 @@ def run_benchmark(
             else None,
             "mrr": round(sum(reciprocal_ranks) / len(reciprocal_ranks), 4)
             if reciprocal_ranks
+            else None,
+            "mean_passage_recall": round(sum(passage_recalls) / len(passage_recalls), 4)
+            if passage_recalls
+            else None,
+            "mean_precision": round(sum(precisions) / len(precisions), 4) if precisions else None,
+            "distractor_rate": round(len(distracted) / len(distractor_cases), 4)
+            if distractor_cases
             else None,
             "answer_passed": answer_passed,
             "answer_rubric_score": round(sum(rubric_scores) / len(rubric_scores), 4)
