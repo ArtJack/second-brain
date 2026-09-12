@@ -16,6 +16,8 @@ exercised with a literal.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from secondbrain.citations import cited_numbers, grounding, invalid_citations
@@ -157,7 +159,7 @@ class TestProductionWiringCarriesTheSignal:
             },
         )
 
-        out = m.ask("anything")
+        out = asyncio.run(m.ask("anything"))
 
         assert out["citations_present"] is False
         assert out["sources_retrieved"] == 1
@@ -173,7 +175,7 @@ class TestProductionWiringCarriesTheSignal:
         )
 
         with pytest.raises(KeyError):
-            m.ask("anything")
+            asyncio.run(m.ask("anything"))
 
     def test_the_sse_stream_emits_grounding_in_its_done_event(self, monkeypatch) -> None:
         """`/ask/stream` is what the web UI uses for interactive answers."""

@@ -24,6 +24,7 @@ Run:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -81,7 +82,7 @@ _WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHi
 
 
 @mcp.tool(annotations=_READONLY)
-def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
+async def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
     """Answer a question from the user's second brain, cited to their own sources.
 
     Retrieves the most relevant stored chunks and has the local model answer using
@@ -95,7 +96,8 @@ def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
             material they keep but did not write — ask there only when the
             question is about that material. "all" searches both.
     """
-    result = ask_fn(
+    result = await asyncio.to_thread(
+        ask_fn,
         question,
         k=top_k if top_k and top_k > 0 else None,
         collection=collections_for(corpus),
@@ -123,7 +125,7 @@ def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
 
 
 @mcp.tool(annotations=_READONLY)
-def recall(query: str, top_k: int = 0) -> dict:
+async def recall(query: str, top_k: int = 0) -> dict:
     """Retrieve raw matching chunks from the brain WITHOUT calling the chat model.
 
     The cheapest grounding primitive: returns the top source passages and their
@@ -134,11 +136,11 @@ def recall(query: str, top_k: int = 0) -> dict:
         query: What to search for.
         top_k: How many chunks to return (0 = configured default).
     """
-    return recall_fn(query, top_k=top_k)
+    return await asyncio.to_thread(recall_fn, query, top_k=top_k)
 
 
 @mcp.tool(annotations=_WRITE)
-def ingest(path: str) -> dict:
+async def ingest(path: str) -> dict:
     """Ingest a file or folder into the second brain (chunk, embed, store).
 
     Args:
@@ -148,15 +150,18 @@ def ingest(path: str) -> dict:
     p = Path(path).expanduser()
     if not p.exists():
         raise ValueError(f"Path not found: {p}")
-    files = chunks = 0
-    for _f, n in ingest_paths(str(p)):
-        files += 1
-        chunks += n
-    return {"path": str(p), "files": files, "chunks": chunks, "total": Store().count()}
+    def _run() -> dict:
+        files = chunks = 0
+        for _f, n in ingest_paths(str(p)):
+            files += 1
+            chunks += n
+        return {"path": str(p), "files": files, "chunks": chunks, "total": Store().count()}
+
+    return await asyncio.to_thread(_run)
 
 
 @mcp.tool(annotations=_WRITE)
-def learn(fact: str) -> dict:
+async def learn(fact: str) -> dict:
     """Durably remember a fact: write it as a Markdown memory and ingest it.
 
     Use for explicit, user-confirmed facts the brain should retain — not for
@@ -165,18 +170,18 @@ def learn(fact: str) -> dict:
     Args:
         fact: The fact to remember, as a short self-contained statement.
     """
-    result = learn_memory(fact)
+    result = await asyncio.to_thread(learn_memory, fact)
     return {"memory_file": str(result["path"]), "chunks": result["chunks"]}
 
 
 @mcp.tool(annotations=_READONLY)
-def list_tasks(status: str = "open") -> dict:
+async def list_tasks(status: str = "open") -> dict:
     """List tasks tracked in the second brain.
 
     Args:
         status: Which tasks to return — "open" (default), "done", or "all".
     """
-    tasks = TaskStore().list(status=status)
+    tasks = await asyncio.to_thread(lambda: TaskStore().list(status=status))
     return {
         "count": len(tasks),
         "tasks": [
@@ -187,39 +192,39 @@ def list_tasks(status: str = "open") -> dict:
 
 
 @mcp.tool(annotations=_WRITE)
-def add_task(title: str, notes: str = "") -> dict:
+async def add_task(title: str, notes: str = "") -> dict:
     """Add a task to the second brain.
 
     Args:
         title: The task description.
         notes: Optional extra detail.
     """
-    t = TaskStore().add(title, notes)
+    t = await asyncio.to_thread(lambda: TaskStore().add(title, notes))
     return {"id": t["id"], "title": t["title"], "status": t["status"], "created_at": t["created_at"]}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True))
-def complete_task(task_id: int) -> dict:
+async def complete_task(task_id: int) -> dict:
     """Mark a task as done.
 
     Args:
         task_id: The id of the task to complete (from list_tasks).
     """
     try:
-        t = TaskStore().complete(task_id)
+        t = await asyncio.to_thread(lambda: TaskStore().complete(task_id))
     except KeyError:
         return {"task_id": task_id, "completed": False, "error": "task not found"}
     return {"task_id": task_id, "completed": True, "status": t["status"]}
 
 
 @mcp.tool(annotations=_READONLY)
-def status() -> dict:
+async def status() -> dict:
     """Report the active backend, models, store, and how much is stored.
 
     Returns no secrets — only the gateway base URL and model aliases.
     """
     try:
-        chunks = Store().count()
+        chunks = await asyncio.to_thread(lambda: Store().count())
     except Exception as exc:  # store may be unreachable; report rather than crash
         chunks = f"unavailable: {exc}"
     return {
