@@ -34,12 +34,13 @@ EXPECTED: dict[str, tuple[bool, bool | None, bool | None]] = {
     "list_tasks": (True, None, None),
     "add_task": (False, False, False),
     "complete_task": (False, None, True),
+    "forget": (False, False, False),
     "status": (True, None, None),
 }
 
 # The tools that must never be auto-approvable. Kept as its own list so the
 # intent survives even if EXPECTED is edited carelessly.
-MUST_NOT_BE_READ_ONLY = {"ingest", "learn", "add_task", "complete_task"}
+MUST_NOT_BE_READ_ONLY = {"ingest", "learn", "add_task", "complete_task", "forget"}
 
 
 @pytest.fixture(scope="module")

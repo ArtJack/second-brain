@@ -24,6 +24,10 @@ def test_ingest_reports_file_and_chunk_counts(monkeypatch, tmp_path: Path) -> No
     """The counts a caller sees are summed across every file, not per file."""
     from secondbrain import mcp_server as m
 
+    # The allow-list is real now; a caller ingesting from elsewhere
+    # configures SB_INGEST_ROOTS, and so does this test.
+    monkeypatch.setattr(m.cfg, "ingest_roots", [str(tmp_path)])
+
     target = tmp_path / "notes"
     target.mkdir()
     seen = {}
@@ -53,6 +57,10 @@ def test_ingest_expands_a_user_relative_path(monkeypatch, tmp_path: Path) -> Non
     """`~` has to resolve, or every caller passing a home-relative path fails."""
     from secondbrain import mcp_server as m
 
+    # The allow-list is real now; a caller ingesting from elsewhere
+    # configures SB_INGEST_ROOTS, and so does this test.
+    monkeypatch.setattr(m.cfg, "ingest_roots", [str(tmp_path)])
+
     seen = {}
     monkeypatch.setattr(
         m, "ingest_paths", lambda path, collection=None: seen.update(path=path) or iter([("x", 1)])
@@ -71,6 +79,10 @@ def test_ingest_refuses_a_missing_path_before_touching_the_store(monkeypatch, tm
     """The refusal must happen first — a bad path should not reach ingestion."""
     from secondbrain import mcp_server as m
 
+    # The allow-list is real now; a caller ingesting from elsewhere
+    # configures SB_INGEST_ROOTS, and so does this test.
+    monkeypatch.setattr(m.cfg, "ingest_roots", [str(tmp_path)])
+
     called = []
     monkeypatch.setattr(m, "ingest_paths", lambda *a, **k: called.append(1) or iter(()))
     monkeypatch.setattr(m, "Store", type("S", (), {"count": lambda self: 0}))
@@ -88,7 +100,7 @@ def test_learn_forwards_the_fact_and_returns_the_memory_path(monkeypatch) -> Non
 
     seen = {}
 
-    def fake_learn_memory(fact):
+    def fake_learn_memory(fact, source="user"):
         seen["fact"] = fact
         return {"path": "/tmp/memories/2026-09-06-a-fact.md", "chunks": 2}
 
@@ -109,7 +121,7 @@ def test_learn_stringifies_a_path_object_from_the_memory_layer(monkeypatch) -> N
     from secondbrain import mcp_server as m
 
     monkeypatch.setattr(
-        m, "learn_memory", lambda fact: {"path": Path("/tmp/memories/x.md"), "chunks": 1}
+        m, "learn_memory", lambda fact, source="user": {"path": Path("/tmp/memories/x.md"), "chunks": 1}
     )
 
     result = asyncio.run(m.learn("anything"))
@@ -122,7 +134,7 @@ def test_learn_does_not_swallow_a_failure_from_the_memory_layer(monkeypatch) -> 
     """A failed write must surface, not return a success-shaped dict."""
     from secondbrain import mcp_server as m
 
-    def boom(fact):
+    def boom(fact, source="user"):
         raise OSError("disk full")
 
     monkeypatch.setattr(m, "learn_memory", boom)

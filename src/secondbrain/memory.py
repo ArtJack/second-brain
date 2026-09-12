@@ -20,15 +20,29 @@ def _slug(text: str, max_len: int = 48) -> str:
     return slug or "memory"
 
 
-def write_memory(text: str, source: str = "user") -> Path:
+def _memory_dir(collection: str | None) -> Path:
+    """Where a memory for this collection lives.
+
+    The default collection keeps the existing directory, so nothing already on
+    disk moves. Everything else gets a subdirectory, because the overnight scan
+    ingests this tree into the real collection — so a memory learned against a
+    sandbox corpus used to reach the real brain by the back door.
+    """
+    if not collection or collection == cfg.collection:
+        return cfg.memory_dir
+    return cfg.memory_dir / collection
+
+
+def write_memory(text: str, source: str = "user", collection: str | None = None) -> Path:
     text = text.strip()
     if not text:
         raise ValueError("memory text cannot be empty")
 
-    cfg.memory_dir.mkdir(parents=True, exist_ok=True)
+    memory_dir = _memory_dir(collection)
+    memory_dir.mkdir(parents=True, exist_ok=True)
     learned_at = datetime.now(UTC).replace(microsecond=0).isoformat()
     name = f"{learned_at.replace(':', '').replace('+0000', 'Z')}-{_slug(text)}-{uuid.uuid4().hex[:8]}.md"
-    path = cfg.memory_dir / name
+    path = memory_dir / name
     path.write_text(
         "\n".join(
             [
@@ -48,7 +62,7 @@ def write_memory(text: str, source: str = "user") -> Path:
 
 
 def learn(text: str, source: str = "user", collection: str | None = None) -> dict:
-    path = write_memory(text, source=source)
+    path = write_memory(text, source=source, collection=collection)
     chunks = 0
     for _, n in ingest_paths(path, collection=collection):
         chunks += n
