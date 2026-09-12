@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import time
+from types import SimpleNamespace
+
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+
+from secondbrain import server
 
 
 @pytest.fixture(autouse=True)
@@ -398,3 +404,126 @@ def test_require_auth_off_keeps_anonymous_reads_working(monkeypatch):
 
     monkeypatch.setattr(server, "Store", FakeStore)
     assert client.get("/status", params={"corpus": "public"}).status_code == 200
+
+
+# --- Task 11: session lifetime, health probe cost, and a limiter that really evicts ---
+
+
+class TestSessionLifetime:
+    """Anonymous session tokens are minted by anyone who can reach /session.
+
+    The store was a plain module-level dict with no cap and no expiry, so every
+    token ever issued stayed valid and resident for the life of the process. On a
+    port exposed through a tunnel that is a memory leak with an authentication
+    bonus.
+    """
+
+    def test_minting_past_the_cap_evicts_the_oldest(self, monkeypatch):
+        monkeypatch.setenv("SB_WEB_SESSION_MAX", "3")
+        client = TestClient(server.app)
+        server._SESSIONS.clear()
+
+        tokens = [client.post("/session").json()["token"] for _ in range(4)]
+
+        assert server._SESSIONS.lookup(tokens[0]) is None, "the oldest token should be gone"
+        assert server._SESSIONS.lookup(tokens[-1]) is not None
+
+    def test_an_expired_token_is_not_a_session(self, monkeypatch):
+        monkeypatch.setenv("SB_WEB_SESSION_TTL_S", "60")
+        client = TestClient(server.app)
+        server._SESSIONS.clear()
+        token = client.post("/session").json()["token"]
+
+        assert server._SESSIONS.lookup(token) is not None
+
+        now = time.time()
+        monkeypatch.setattr(server.time, "time", lambda: now + 61)
+
+        assert server._SESSIONS.lookup(token) is None
+
+    def test_expiry_is_enforced_at_the_auth_boundary(self, monkeypatch):
+        """A dead token must not authenticate, not merely fail a lookup."""
+        monkeypatch.setenv("SB_WEB_SESSION_TTL_S", "60")
+        server._SESSIONS.clear()
+        client = TestClient(server.app)
+        token = client.post("/session").json()["token"]
+
+        now = time.time()
+        monkeypatch.setattr(server.time, "time", lambda: now + 61)
+
+        with pytest.raises(HTTPException) as excinfo:
+            server._auth_from_header(f"Bearer {token}")
+        assert excinfo.value.status_code == 401
+
+
+class TestHealthProbeCost:
+    def test_a_burst_of_health_checks_costs_one_embedding(self, monkeypatch):
+        """/health is anonymous and exempt from the limiter: it must not be a GPU tap."""
+        calls = {"n": 0}
+
+        def counted(texts):
+            calls["n"] += 1
+            return [[0.1, 0.2]]
+
+        monkeypatch.setattr(server, "embed", counted)
+        monkeypatch.setattr(server, "Store", lambda **kw: type("S", (), {"count": lambda self: 3})())
+        server._reset_health_cache()
+        client = TestClient(server.app)
+
+        first = client.get("/health")
+        second = client.get("/health")
+
+        assert first.status_code == 200
+        assert second.json() == first.json()
+        assert calls["n"] == 1, f"{calls['n']} embeddings for two health checks"
+
+    def test_the_cache_expires_so_an_outage_is_still_noticed(self, monkeypatch):
+        calls = {"n": 0}
+
+        def counted(texts):
+            calls["n"] += 1
+            return [[0.1, 0.2]]
+
+        monkeypatch.setattr(server, "embed", counted)
+        monkeypatch.setattr(server, "Store", lambda **kw: type("S", (), {"count": lambda self: 3})())
+        server._reset_health_cache()
+        client = TestClient(server.app)
+        client.get("/health")
+
+        now = time.monotonic()
+        monkeypatch.setattr(server.time, "monotonic", lambda: now + 120)
+        client.get("/health")
+
+        assert calls["n"] == 2
+
+
+class TestRateLimitEviction:
+    def test_idle_keys_are_dropped_not_just_empty_ones(self, monkeypatch):
+        """The old sweep deleted entries whose deque was empty — which, inside a
+        window, is none of them. A scan across source addresses grew the table
+        without bound."""
+        monkeypatch.setenv("SB_WEB_RATE_LIMIT_PER_MIN", "20")
+        server._rate_hits.clear()
+
+        now = [1000.0]
+        monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+
+        for i in range(12_000):
+            request = SimpleNamespace(
+                headers={"cf-connecting-ip": f"10.0.{i // 256}.{i % 256}"},
+                state=SimpleNamespace(auth=None),
+                client=None,
+            )
+            server._rate_limited(request)
+
+        assert len(server._rate_hits) == 12_000
+
+        now[0] += 3600  # everything is now far outside the window
+        request = SimpleNamespace(
+            headers={"cf-connecting-ip": "10.9.9.9"},
+            state=SimpleNamespace(auth=None),
+            client=None,
+        )
+        server._rate_limited(request)
+
+        assert len(server._rate_hits) < 100, f"{len(server._rate_hits)} stale keys retained"
