@@ -338,8 +338,14 @@ class TestRulesAreRetroactive:
         assert store.deleted == []
         assert "100%" in str(excinfo.value)
 
-    def test_an_unreadable_rules_file_does_not_take_the_sweep_down(self, tmp_path, monkeypatch):
-        """The missing-file sweep is the part that must keep working."""
+    def test_an_unreadable_rules_file_does_not_take_the_default_sweep_down(self, tmp_path, monkeypatch):
+        """The missing-file sweep is the part that must keep working.
+
+        It runs nightly and it is the half with no other remedy, so losing the
+        rules must never cost it. Enforcement is the opposite case and is tested
+        below: there, the caller asked to delete by rules that cannot be read,
+        and the only safe answer is to refuse.
+        """
         from secondbrain import gc as gc_mod
 
         def unreadable():
@@ -352,7 +358,164 @@ class TestRulesAreRetroactive:
             path.write_text("x")
         store = FakeStore({str(gone): 2, **{str(k): 1 for k in keepers}})
 
-        res = gc_mod.collect_garbage(store=store, enforce_rules=True)
+        res = gc_mod.collect_garbage(store=store)
 
         assert res["removed_sources"] == 1
         assert res["excluded_sources"] == 0
+
+    def test_enforcing_against_an_unreadable_rules_file_refuses(self, tmp_path, monkeypatch):
+        from secondbrain import gc as gc_mod
+
+        def unreadable():
+            raise OSError("nope")
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", unreadable)
+        keepers = [tmp_path / f"here{i}.md" for i in range(3)]
+        for path in keepers:
+            path.write_text("x")
+        store = FakeStore({str(k): 1 for k in keepers})
+
+        with pytest.raises(gc_mod.GarbageCollectionRefused):
+            gc_mod.collect_garbage(store=store, enforce_rules=True)
+
+        assert store.deleted == []
+
+
+class TestVerdictFoundTheseAfterTheFirstAttempt:
+    """Five defects in the first version of rule enforcement, all mine.
+
+    Worth keeping the list together, because they share one root: the tests
+    passed `rules=` directly, which is an argument the CLI never supplies. Every
+    test exercised a path no user could reach.
+    """
+
+    def _corpus(self, tmp_path, n=8):
+        sources = {}
+        for i in range(n):
+            path = tmp_path / f"note{i}.md"
+            path.write_text("x")
+            sources[str(path)] = 1
+        return sources
+
+    def test_the_default_sweep_reports_drift_without_being_handed_rules(self, tmp_path, monkeypatch):
+        """SB-F-35: rule *loading* was gated on enforce_rules, so plain `sb gc` always said zero.
+
+        The PR claimed the default sweep counts excluded sources and names the
+        flag. It could not: with no `rules=` argument and `enforce_rules=False`,
+        nothing was ever loaded, and the CLI branch that prints the count was
+        dead code.
+        """
+        from secondbrain import gc as gc_mod
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: {"exclude_globs": ["*secret*"]})
+        sources = self._corpus(tmp_path)
+        secret = tmp_path / "aws-secrets.md"
+        secret.write_text("x")
+        sources[str(secret)] = 4
+        store = FakeStore(sources)
+
+        res = gc_mod.collect_garbage(store=store)
+
+        assert res["excluded_sources"] == 1, "the default sweep must see what the rules exclude"
+        assert res["excluded_chunks"] == 4
+        assert store.deleted == [], "seeing is not deleting"
+
+    def test_loading_rules_never_creates_a_config(self, tmp_path, monkeypatch):
+        """SB-F-36: it went through ensure_config, which writes DEFAULT_CONFIG when absent.
+
+        gc then deleted by rules the owner never wrote — and the file it left
+        behind declares scan targets of ~/Documents, ~/Desktop, ~/Downloads and
+        ~/Projects, arming the nightly scanner as a side effect of a sweep.
+        """
+        from secondbrain import gc as gc_mod
+
+        config = tmp_path / "overnight" / "config.json"
+        monkeypatch.setattr(gc_mod, "_scan_config_path", lambda: config)
+
+        assert gc_mod._load_scan_rules() is None
+        assert not config.exists(), "reading rules must never write a config"
+        assert not config.parent.exists(), "nor create the directory for one"
+
+    def test_enforcing_with_no_config_refuses_rather_than_inventing_rules(self, tmp_path, monkeypatch):
+        """Fail closed. Deleting by rules nobody wrote is the failure mode here."""
+        from secondbrain import gc as gc_mod
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: None)
+        store = FakeStore(self._corpus(tmp_path))
+
+        with pytest.raises(gc_mod.GarbageCollectionRefused) as excinfo:
+            gc_mod.collect_garbage(store=store, enforce_rules=True)
+
+        assert store.deleted == []
+        assert "no scan config" in str(excinfo.value).lower()
+
+    def test_a_sweep_with_no_config_still_removes_missing_files(self, tmp_path, monkeypatch):
+        """The half with no other remedy keeps working when the other half cannot."""
+        from secondbrain import gc as gc_mod
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: None)
+        sources = self._corpus(tmp_path)
+        sources[str(tmp_path / "gone.md")] = 2
+        store = FakeStore(sources)
+
+        res = gc_mod.collect_garbage(store=store)
+
+        assert res["removed_sources"] == 1
+        assert res["excluded_sources"] == 0
+
+    def test_excluded_sources_stay_in_the_guard_s_denominator(self, tmp_path, monkeypatch):
+        """SB-F-37: they fell out of both counts, so the reported share was wrong.
+
+        Rule-matching sources were neither `doomed` nor `kept`, so a corpus of
+        13 with 3 genuinely missing reported "60% (3 of 5)" and refused a sweep
+        that should have proceeded.
+        """
+        from secondbrain import gc as gc_mod
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: {"exclude_globs": ["*lock*"]})
+        sources = self._corpus(tmp_path, n=10)
+        for i in range(8):
+            lock = tmp_path / f"file{i}.lock.md"
+            lock.write_text("x")
+            sources[str(lock)] = 1
+        sources[str(tmp_path / "gone.md")] = 1
+        store = FakeStore(sources)
+
+        res = gc_mod.collect_garbage(store=store)
+
+        assert res["removed_sources"] == 1, "one missing file out of nineteen is not a majority"
+        assert res["kept_sources"] + res["excluded_sources"] == 18
+
+    def test_a_malformed_config_loses_rule_enforcement_not_the_sweep(self, tmp_path, monkeypatch):
+        """SB-F-39: `{"exclude_globs": null}` and a bare `42` both raised TypeError."""
+        from secondbrain import gc as gc_mod
+
+        sources = self._corpus(tmp_path)
+        sources[str(tmp_path / "gone.md")] = 1
+
+        for broken in ({"exclude_globs": None}, {"exclude_dirs": 42}, {"exclude_globs": [None, 7]}):
+            monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda broken=broken: broken)
+            store = FakeStore(dict(sources))
+
+            res = gc_mod.collect_garbage(store=store)
+
+            assert res["removed_sources"] == 1, f"{broken} took the sweep down with it"
+            assert res["excluded_sources"] == 0
+
+    def test_the_refusal_names_the_rule_when_rules_are_what_would_delete(self, tmp_path, monkeypatch):
+        """SB-F-40: the message said "re-run with --force", training the wrong habit.
+
+        Under a bad rule, --force is the worst possible next step: it is exactly
+        the flag that turns a typo into a deleted corpus.
+        """
+        from secondbrain import gc as gc_mod
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: {"exclude_globs": ["*.md"]})
+        store = FakeStore(self._corpus(tmp_path))
+
+        with pytest.raises(gc_mod.GarbageCollectionRefused) as excinfo:
+            gc_mod.collect_garbage(store=store, enforce_rules=True)
+
+        message = str(excinfo.value)
+        assert "*.md" in message, "the owner needs to see which rule did this"
+        assert "--force" not in message, "do not recommend the flag that makes a typo permanent"

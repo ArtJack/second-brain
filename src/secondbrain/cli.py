@@ -606,7 +606,11 @@ def browser_check(
 @app.command()
 def gc(
     dry_run: bool = typer.Option(False, "--dry-run", help="Report what would be removed, delete nothing"),
-    force: bool = typer.Option(False, "--force", help="Proceed even if most sources look missing"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Skip the majority guard entirely — including for rule removals, where it is the guard that catches a typo",
+    ),
     enforce_rules: bool = typer.Option(
         False,
         "--enforce-rules",
