@@ -43,6 +43,13 @@ SKIP_DIRS = {".venv", "node_modules", ".git", "__pycache__", ".next"}
 # anywhere — the mistake recorded for `data` above.
 SKIP_PATHS = ("evals/corpus", "evals/corpus-hard")
 
+# The benchmark definitions carry the same invented claims as the corpus they
+# score, and in a worse shape for retrieval: each fabricated fact sits directly
+# beside a verbatim copy of the question it answers. Anchored like everything
+# else here, because `hard.json` is a generic enough name to belong to someone
+# else's project.
+SKIP_FILES = ("evals/hard.json", "evals/regression.json", "evals/retrieval.json")
+
 # Encodings tried in order before a file is declared undecodable. `errors="ignore"`
 # is not on this list and must not come back: it does not fall back, it deletes the
 # bytes it cannot read and hands on the wreckage, which then gets embedded and
@@ -382,6 +389,10 @@ def _is_skipped_dir(path: Path, own_data: Path, *, root: Path | None = None) -> 
     # Imported here rather than at module scope: overnight imports this module.
     from .overnight import excluded_dir_rule
 
+    if excluded_dir_rule(path.parts, SKIP_FILES) and (
+        root is None or excluded_dir_rule(root.parts, SKIP_FILES) is None
+    ):
+        return "benchmark-fixture"
     if excluded_dir_rule(path.parts[:-1], SKIP_PATHS):
         # Asking for the directory by name is not the same as sweeping it up.
         # The rule exists so `sb ingest ~/Projects/second-brain` does not walk

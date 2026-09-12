@@ -121,6 +121,11 @@ def test_an_empty_collection_is_not_an_error():
         "excluded_enforced": False,
         "excluded": [],
         "excluded_by_rule": {},
+        # False because this test runs against a temporary state directory with
+        # no scan config, which is the same answer as an unreadable one: there
+        # are no rules to apply, so `excluded_sources: 0` means "unknown", not
+        # "none".
+        "rules_loaded": False,
         "dry_run": False,
         "removed": [],
     }
@@ -519,3 +524,72 @@ class TestVerdictFoundTheseAfterTheFirstAttempt:
         message = str(excinfo.value)
         assert "*.md" in message, "the owner needs to see which rule did this"
         assert "--force" not in message, "do not recommend the flag that makes a typo permanent"
+
+
+class TestRunSixMinors:
+    def _corpus(self, tmp_path, n=8):
+        sources = {}
+        for i in range(n):
+            path = tmp_path / f"note{i}.md"
+            path.write_text("x")
+            sources[str(path)] = 1
+        return sources
+
+    def test_an_unreadable_config_says_so_instead_of_reporting_no_drift(self, tmp_path, monkeypatch):
+        """SB-F-48: this is the failure SB-F-35 was filed to remove, reintroduced.
+
+        SB-F-35 was "the default sweep always reports zero excluded sources".
+        The fix made it load the rules — but when the config cannot be read the
+        result is the same silent zero, and now it is indistinguishable from a
+        genuinely clean corpus. An empty drift report has to mean "I looked",
+        not "I could not look".
+        """
+        from secondbrain import gc as gc_mod
+
+        def unreadable():
+            raise OSError("nope")
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", unreadable)
+        store = FakeStore(self._corpus(tmp_path))
+
+        res = gc_mod.collect_garbage(store=store)
+
+        assert res["rules_loaded"] is False
+        assert res["excluded_sources"] == 0
+
+    def test_a_readable_config_reports_that_it_looked(self, tmp_path, monkeypatch):
+        from secondbrain import gc as gc_mod
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: {"exclude_globs": ["*.lock"]})
+        store = FakeStore(self._corpus(tmp_path))
+
+        assert gc_mod.collect_garbage(store=store)["rules_loaded"] is True
+
+    def test_a_mixed_sweep_still_names_the_rules_rather_than_force(self, tmp_path, monkeypatch):
+        """SB-F-46: the rule-dominant branch only fired when rules outnumbered misses.
+
+        With four missing files and three rule matches the generic message came
+        back, and it recommends `--force`. Following that advice deletes chunks
+        for the three files that are present on disk — which is the one thing
+        the guard exists to make someone think about.
+        """
+        from secondbrain import gc as gc_mod
+
+        monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: {"exclude_globs": ["*.lock"]})
+        sources = {}
+        for i in range(4):
+            sources[str(tmp_path / f"gone{i}.md")] = 1
+        for i in range(3):
+            present = tmp_path / f"file{i}.lock"
+            present.write_text("x")
+            sources[str(present)] = 1
+        (tmp_path / "kept.md").write_text("x")
+        sources[str(tmp_path / "kept.md")] = 1
+        store = FakeStore(sources)
+
+        with pytest.raises(gc_mod.GarbageCollectionRefused) as excinfo:
+            gc_mod.collect_garbage(store=store, enforce_rules=True)
+
+        message = str(excinfo.value)
+        assert "*.lock" in message, "the rules that would delete present files must be named"
+        assert "--force" not in message

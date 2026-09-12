@@ -283,3 +283,48 @@ class TestDirectIngestHonoursTheFixtureExclusion:
         fixture.write_text("x")
 
         assert [p.name for p in discover(fixture)] == ["one.md"]
+
+
+class TestTheBenchmarkDefinitionsAreFixturesToo:
+    """SB-F-45: the JSON files carry the same invented claims as the corpus.
+
+    Excluding `evals/corpus-hard/` kept the fabricated runbook out. It did not
+    keep out `evals/hard.json`, which stores each invented claim *directly
+    beside a verbatim copy of the question it answers* — an expected-answer
+    field saying "80" next to "At what point does the gateway budget alert
+    fire?". As retrieval material that is worse than the prose, not better.
+
+    I argued last night that they "read as configuration rather than as notes",
+    and that is a claim about a human squinting at a citation, not about what
+    retrieval does with the text.
+    """
+
+    def test_the_benchmark_definitions_are_not_swept_up(self, tmp_path):
+        from secondbrain.ingest import discover
+
+        evals = tmp_path / "evals"
+        evals.mkdir()
+        for name in ("hard.json", "regression.json", "retrieval.json"):
+            (evals / name).write_text('{"cases": []}')
+        (tmp_path / "real.md").write_text("a real note")
+
+        assert [p.name for p in discover(tmp_path)] == ["real.md"]
+
+    def test_an_unrelated_hard_json_elsewhere_is_untouched(self, tmp_path):
+        """Anchored, like every other rule here — `hard.json` is a generic name."""
+        from secondbrain.ingest import discover
+
+        other = tmp_path / "src" / "hard.json"
+        other.parent.mkdir(parents=True)
+        other.write_text("{}")
+
+        assert [p.name for p in discover(tmp_path)] == ["hard.json"]
+
+    def test_pointing_at_one_directly_still_reads_it(self, tmp_path):
+        from secondbrain.ingest import discover
+
+        bench = tmp_path / "evals" / "hard.json"
+        bench.parent.mkdir(parents=True)
+        bench.write_text("{}")
+
+        assert [p.name for p in discover(bench)] == ["hard.json"]

@@ -162,6 +162,7 @@ def collect_garbage(
     store = store if store is not None else Store(collection=collection)
     sources = store.sources()
 
+    rules_loaded = rules is not None
     if rules is None:
         # Loaded whether or not they will be enforced. Gating the *load* on
         # `enforce_rules` meant a plain `sb gc` always reported zero excluded
@@ -170,10 +171,15 @@ def collect_garbage(
         # free.
         try:
             rules = _load_scan_rules()
+            rules_loaded = rules is not None
         except (OSError, ValueError):
             # Losing the rules must not lose the sweep. The missing-file half is
-            # the part that runs nightly and the part with no other remedy.
+            # the part that runs nightly and the part with no other remedy. But
+            # it must not look like a clean corpus either: an empty drift report
+            # has to mean "I looked", not "I could not look", which is the same
+            # silent zero SB-F-35 was filed to remove.
             rules = None
+            rules_loaded = False
         if rules is None and enforce_rules:
             raise GarbageCollectionRefused(
                 "refusing to enforce rules: no scan config at "
@@ -226,7 +232,11 @@ def collect_garbage(
     if considered and not force:
         share = doomed / considered
         if share > REFUSAL_THRESHOLD:
-            if enforce_rules and len(excluded) >= len(missing):
+            # Any rule contribution at all, not just a majority of one. With
+            # four missing files and three rule matches the generic message came
+            # back — and it recommends --force, which would delete chunks for
+            # three files that are present on disk.
+            if enforce_rules and excluded:
                 # Naming --force here would be the worst possible advice: under
                 # a bad rule it is the flag that turns a typo into a deleted
                 # corpus. Name the rules instead.
@@ -266,6 +276,9 @@ def collect_garbage(
         "excluded_sources": len(excluded),
         "excluded_chunks": sum(chunks for chunks, _ in excluded.values()),
         "excluded_enforced": enforce_rules,
+        # False means the rules could not be read, so `excluded_sources: 0` is
+        # "unknown" rather than "none".
+        "rules_loaded": rules_loaded,
         "excluded": sorted(excluded),
         "excluded_by_rule": {source: rule for source, (_, rule) in sorted(excluded.items())},
     }
