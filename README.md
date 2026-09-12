@@ -16,6 +16,7 @@ sb chat                      # interactive
 sb overnight                 # safe nightly scan: ingest changed files + write a morning report
 sb morning                   # daily briefing from overnight runs, tasks, and cited RAG
 sb status
+sb gc --dry-run              # show chunks whose source file is gone; drop the flag to remove them
 sb eval                      # retrieval benchmark (add --answers for chat-model checks)
 SB_COLLECTION=second_brain_regression sb eval evals/regression.json --ingest-corpus
 sb eval --answers --trace-output data/eval-traces.json

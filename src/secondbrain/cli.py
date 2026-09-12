@@ -16,6 +16,7 @@ from .ask import recall as recall_fn
 from .browser_check import DEFAULT_BROWSER_DIR, capture_url
 from .config import cfg
 from .evals import DEFAULT_BENCHMARK, load_benchmark, resolve_corpus_paths, run_benchmark, select_cases
+from .gc import GarbageCollectionRefused, collect_garbage
 from .ingest import ingest_paths
 from .intake import PRIVATE_EVAL_DIR, build_private_artifacts, reset_session, run_intake
 from .health import run_health
@@ -561,6 +562,36 @@ def browser_check(
             f"collection chunks: {ingest_res['total']}"
         )
     console.print(Panel("\n".join(lines), title="browser check", border_style="green"))
+
+
+@app.command()
+def gc(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report what would be removed, delete nothing"),
+    force: bool = typer.Option(False, "--force", help="Proceed even if most sources look missing"),
+):
+    """Remove chunks whose source file no longer exists."""
+    try:
+        res = collect_garbage(collection=_COLLECTION, dry_run=dry_run, force=force)
+    except GarbageCollectionRefused as exc:
+        console.print(f"[yellow]gc refused:[/] {exc}")
+        raise typer.Exit(2) from exc
+    except Exception as exc:
+        console.print(f"[red]gc failed:[/] {exc}")
+        raise typer.Exit(1) from exc
+    lines = [
+        f"mode      : {'dry run' if res['dry_run'] else 'delete'}",
+        f"removed   : {res['removed_sources']} source(s), {res['removed_chunks']} chunk(s)",
+        f"kept      : {res['kept_sources']} source(s)",
+        f"skipped   : {res['skipped_sources']} relative source(s)",
+    ]
+    if res["removed"]:
+        lines.append("")
+        lines.append("Removed sources:" if not res["dry_run"] else "Would remove:")
+        for source in res["removed"][:20]:
+            lines.append(f"- {source}")
+        if len(res["removed"]) > 20:
+            lines.append(f"- ...and {len(res['removed']) - 20} more")
+    console.print(Panel("\n".join(lines), title="gc", border_style="green"))
 
 
 @app.command()

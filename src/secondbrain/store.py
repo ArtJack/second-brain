@@ -72,6 +72,18 @@ class ChromaStore:
             return None
         return {"document": docs[0] or "", "metadata": metadatas[0] or {}, "distance": 1.0}
 
+    def sources(self, batch_size: int = 1000) -> dict[str, int]:
+        """Every distinct `source` in the collection, with its chunk count."""
+        counts: dict[str, int] = {}
+        total = self.count()
+        for offset in range(0, total, batch_size):
+            res = self._col.get(limit=batch_size, offset=offset, include=["metadatas"])
+            for meta in res.get("metadatas") or []:
+                source = (meta or {}).get("source")
+                if source:
+                    counts[source] = counts.get(source, 0) + 1
+        return counts
+
     def count(self) -> int:
         return self._col.count()
 
@@ -239,6 +251,32 @@ class QdrantStore:
         payload = response[0].payload or {}
         metadata = {key: value for key, value in payload.items() if key != "document"}
         return {"document": payload.get("document", ""), "metadata": metadata, "distance": 1.0}
+
+    def sources(self, batch_size: int = 1000) -> dict[str, int]:
+        """Every distinct `source` in the collection, with its chunk count.
+
+        Asks for the one payload field rather than `documents()`'s whole text,
+        which on the real collection is several megabytes per call.
+        """
+        if not self._exists():
+            return {}
+        counts: dict[str, int] = {}
+        offset = None
+        while True:
+            points, offset = self._client.scroll(
+                collection_name=self._collection,
+                limit=batch_size,
+                offset=offset,
+                with_payload=["source"],
+                with_vectors=False,
+            )
+            for point in points:
+                source = (point.payload or {}).get("source")
+                if source:
+                    counts[source] = counts.get(source, 0) + 1
+            if offset is None:
+                break
+        return counts
 
     def count(self) -> int:
         if not self._exists():
