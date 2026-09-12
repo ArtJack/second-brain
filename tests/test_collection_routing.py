@@ -93,7 +93,7 @@ def test_learn_routes_to_named_collection(tmp_path, monkeypatch):
     captured = {}
     path = tmp_path / "memory.md"
 
-    monkeypatch.setattr(memory, "write_memory", lambda text, source="user": path)
+    monkeypatch.setattr(memory, "write_memory", lambda text, source="user", collection=None: path)
 
     def fake_ingest_paths(ingest_path, collection=None):
         captured["path"] = ingest_path

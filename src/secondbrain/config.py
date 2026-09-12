@@ -43,6 +43,17 @@ class Config:
         # tailnet, that is indistinguishable from a hang — and the MCP server that
         # waits on it is shared by every session on the network.
         self.llm_timeout_s: float = float(os.getenv("SB_LLM_TIMEOUT_S", "60"))
+        # Roots the MCP ingest tool may read from. The tool is reachable over the
+        # tailnet by anything holding SB_MCP_TOKEN, and paired with `recall` an
+        # unrestricted ingest is an arbitrary-file-read primitive: ingest the
+        # file, then ask for it back. Defaults to this repo and the memory
+        # directory, which is everything the owner actually ingests by hand.
+        roots = os.getenv("SB_INGEST_ROOTS", "")
+        self.ingest_roots: list[str] = (
+            [r for r in roots.split(os.pathsep) if r.strip()]
+            if roots.strip()
+            else [str(_ROOT), str(Path(os.getenv("SB_MEMORY_DIR") or (_ROOT / "data" / "memory")))]
+        )
         self.hybrid_enabled: bool = os.getenv("SB_HYBRID", "1").strip().lower() not in {
             "0",
             "false",

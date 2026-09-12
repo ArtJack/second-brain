@@ -251,6 +251,22 @@ class ScanResult:
     skipped: list[dict[str, str]]
 
 
+def _is_foreign_memory(path: Path) -> bool:
+    """A memory filed under another collection's subdirectory.
+
+    Memories are written to `<memory_dir>/<collection>/` for anything but the
+    default collection. This scan ingests into the default collection, so those
+    subdirectories are deliberately not its business: walking them would put a
+    sandbox visitor's text into the owner's real brain by the back door — the
+    leak the subdirectories exist to close, left open one level down.
+    """
+    try:
+        relative = path.resolve().relative_to(Path(cfg.memory_dir).resolve())
+    except (ValueError, OSError):
+        return False
+    return len(relative.parts) > 1
+
+
 def scan_targets(config: dict[str, Any]) -> ScanResult:
     """Every supported file under the targets, and why each excluded one was dropped.
 
@@ -267,6 +283,9 @@ def scan_targets(config: dict[str, Any]) -> ScanResult:
 
     def consider(path: Path) -> None:
         if path.suffix.lower() not in SUPPORTED:
+            return
+        if _is_foreign_memory(path):
+            skipped.append({"path": str(path), "rule": "memory for another collection"})
             return
         rule = _excluded_by_glob(path.name, globs)
         if rule:

@@ -81,6 +81,26 @@ _READONLY = ToolAnnotations(readOnlyHint=True)
 _WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False)
 
 
+
+def _within_allowed_roots(path: str) -> Path:
+    """Resolve a caller-supplied path and refuse anything outside the allow-list.
+
+    This tool is reachable over the tailnet by anything holding SB_MCP_TOKEN, and
+    paired with `recall` an unrestricted ingest is an arbitrary-file-read
+    primitive: ingest the file, then ask for it back. Symlinks are resolved
+    before the comparison, because otherwise a link inside an allowed root reads
+    whatever it points at.
+    """
+    resolved = Path(path).expanduser().resolve()
+    roots = [Path(root).expanduser().resolve() for root in cfg.ingest_roots]
+    if not any(resolved == root or root in resolved.parents for root in roots):
+        raise ValueError(
+            f"Refusing to ingest {resolved}: outside SB_INGEST_ROOTS "
+            f"({', '.join(str(r) for r in roots)})"
+        )
+    return resolved
+
+
 @mcp.tool(annotations=_READONLY)
 async def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
     """Answer a question from the user's second brain, cited to their own sources.
@@ -147,7 +167,7 @@ async def ingest(path: str) -> dict:
         path: A file or directory path on the host running this server. Supported
             types include .md, .txt, .py/.js/.ts, .json/.yaml/.toml, and .pdf.
     """
-    p = Path(path).expanduser()
+    p = _within_allowed_roots(path)
     if not p.exists():
         raise ValueError(f"Path not found: {p}")
     def _run() -> dict:
@@ -170,8 +190,36 @@ async def learn(fact: str) -> dict:
     Args:
         fact: The fact to remember, as a short self-contained statement.
     """
-    result = await asyncio.to_thread(learn_memory, fact)
+    result = await asyncio.to_thread(learn_memory, fact, source="mcp")
     return {"memory_file": str(result["path"]), "chunks": result["chunks"]}
+
+
+@mcp.tool(annotations=_WRITE)
+async def forget(memory_file: str) -> dict:
+    """Delete a learned memory: the file and every chunk it produced.
+
+    The counterpart to `learn`. Without it, removing a memory file left its
+    chunks retrievable forever — the wrong default for a system whose promise is
+    that the owner decides what it knows. Refuses any path outside the memory
+    directory, so this is not a general-purpose delete.
+
+    Args:
+        memory_file: Path to the memory file, as returned by `learn`.
+    """
+    resolved = Path(memory_file).expanduser().resolve()
+    memory_root = Path(cfg.memory_dir).expanduser().resolve()
+    if memory_root not in resolved.parents:
+        raise ValueError(f"Refusing to forget {resolved}: not inside {memory_root}")
+
+    def _run() -> dict:
+        store = Store()
+        store.delete_source(str(resolved))
+        existed = resolved.exists()
+        if existed:
+            resolved.unlink()
+        return {"memory_file": str(resolved), "deleted": existed}
+
+    return await asyncio.to_thread(_run)
 
 
 @mcp.tool(annotations=_READONLY)
