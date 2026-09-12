@@ -453,12 +453,33 @@ def run_benchmark(
     rubric_scores = [case["answer"]["rubric_score"] for case in case_results] if include_answers else []
     abstention_cases = [case for case in case_results if case.get("expect_abstain")]
     answerable_cases = [case for case in case_results if not case.get("expect_abstain")]
+    # A run that scored nothing is not a run that succeeded. `all([])` is True,
+    # so an empty collection, a `--tag` filter that happens to select only
+    # abstention cases, or a corpus whose files all failed to decode produced
+    # `retrieval 0/0`, a table of dashes, and exit 0 — which reads as a pass in
+    # a terminal and *is* a pass to CI. This command is the gate on every
+    # retrieval change, so a vacuous pass is the worst thing it can return.
+    #
+    # "Nothing" is the precise claim, and it has to stay precise: an
+    # abstention-only run with --answers scores no retrieval cases and is a
+    # perfectly good measurement of abstention. What must never pass is a run
+    # where neither retrieval nor answers were graded.
+    failure_reason = None
+    if not retrieval_cases and not (include_answers and case_results):
+        failure_reason = (
+            f"scored no retrieval cases ({len(case_results)} case(s) ran, "
+            f"{len(case_results) - len(retrieval_cases)} skipped without scoring). Nothing was "
+            "measured, so nothing can be concluded — check that the collection was ingested, and "
+            "that any --tag filter still selects answerable cases. Add --answers to grade "
+            "abstention-only runs."
+        )
     return {
         "benchmark": benchmark.get("name", "unnamed"),
         "description": benchmark.get("description", ""),
         "mode": "retrieval+answers" if include_answers else "retrieval",
         "top_k": default_top_k,
-        "passed": all(case["passed"] for case in case_results),
+        "passed": failure_reason is None and all(case["passed"] for case in case_results),
+        "failure_reason": failure_reason,
         "summary": {
             "cases": len(case_results),
             "retrieval_cases": len(retrieval_cases),

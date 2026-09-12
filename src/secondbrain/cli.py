@@ -348,6 +348,10 @@ def evaluate(
                 checks = case["answer"]["checks"]
                 failed = ", ".join(name for name, passed in checks.items() if not passed)
                 console.print(f"[red]FAIL[/] {case['id']}: answer checks: {failed}")
+    if report.get("failure_reason"):
+        # Loud, because the failure mode is a table of dashes that reads as a
+        # clean run. The exit code alone would be silent in a terminal.
+        console.print(f"[red]eval measured nothing:[/] {report['failure_reason']}")
     if not report["passed"]:
         raise typer.Exit(1)
 
