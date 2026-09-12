@@ -402,3 +402,54 @@ def test_rebuilding_still_replaces_a_source_left_over_from_a_previous_index(tmp_
 
     assert index.count("c") == 1
     assert index.query("c", "deleted file", limit=3) == []
+
+
+def test_an_index_built_on_an_older_schema_is_rebuilt_rather_than_failing(tmp_path):
+    """The index is a derived cache, so a schema change may drop it — silently failing is not an option.
+
+    Adding the contextual header as its own searchable column changes the FTS5
+    table. `CREATE TABLE IF NOT EXISTS` keeps whatever is already on disk, so
+    without this every insert against a pre-existing index raises "table kw_c
+    has 4 columns but 5 values were supplied" — during the nightly, on the
+    deployed machine, at 03:15.
+    """
+    import sqlite3
+
+    path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE VIRTUAL TABLE kw_c USING fts5("
+            "source UNINDEXED, chunk UNINDEXED, name UNINDEXED, document, "
+            "tokenize='unicode61 remove_diacritics 2')"
+        )
+        conn.execute("INSERT INTO kw_c VALUES ('/old.md', 0, 'old.md', 'stale text')")
+
+    index = KeywordIndex(path)
+    index.upsert_chunks("c", _rows(("/new.md", 0, "gateway routing")))
+
+    assert index.count("c") == 1, "the stale rows go with the old schema; a reindex repopulates"
+    assert index.query("c", "gateway routing", limit=3)[0]["metadata"]["source"] == "/new.md"
+
+
+def test_the_header_is_searchable_but_is_not_what_a_citation_quotes(tmp_path):
+    index = KeywordIndex(tmp_path / "headers.sqlite3")
+    index.upsert_chunks(
+        "c",
+        [
+            {
+                "source": "/runbook.md",
+                "chunk": 3,
+                "name": "runbook.md",
+                "header": "Gateway runbook › Restarting",
+                "document": "Stop the launchd job and wait for the port to close.",
+            }
+        ],
+    )
+
+    # The header's words find the chunk even though the body never says them.
+    hits = index.query("c", "gateway runbook restarting", limit=3)
+
+    assert hits and hits[0]["metadata"]["source"] == "/runbook.md"
+    assert hits[0]["document"] == "Stop the launchd job and wait for the port to close."
+    assert "Gateway runbook" not in hits[0]["document"]
+    assert hits[0]["metadata"]["header"] == "Gateway runbook › Restarting"
