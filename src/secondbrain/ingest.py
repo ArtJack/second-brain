@@ -376,14 +376,23 @@ def read_file(path: Path) -> str:
     raise ValueError(f"cannot decode {path} as any of: {', '.join(attempted)}")
 
 
-def _is_skipped_dir(path: Path, own_data: Path) -> str | None:
+def _is_skipped_dir(path: Path, own_data: Path, *, root: Path | None = None) -> str | None:
     if SKIP_DIRS & set(path.parts):
         return "skipped-dir"
     # Imported here rather than at module scope: overnight imports this module.
     from .overnight import excluded_dir_rule
 
     if excluded_dir_rule(path.parts[:-1], SKIP_PATHS):
-        return "benchmark-fixture"
+        # Asking for the directory by name is not the same as sweeping it up.
+        # The rule exists so `sb ingest ~/Projects/second-brain` does not walk
+        # the fabricated benchmark documents into the owner's corpus. It must
+        # not also stop `sb eval --ingest-corpus`, which points straight at
+        # `evals/corpus-hard` to build a throwaway collection — the first
+        # version of this rule did exactly that and quietly turned the hard
+        # benchmark into a no-op, while it kept reporting 14/18 from the
+        # previous run's chunks.
+        if root is None or excluded_dir_rule(root.parts, SKIP_PATHS) is None:
+            return "benchmark-fixture"
     try:
         if own_data in path.resolve().parents:
             return "own-data-dir"
@@ -403,7 +412,7 @@ def discover(root: str | Path) -> list[Path]:
     for p in sorted(root.rglob("*")):
         if not p.is_file():
             continue
-        reason = _is_skipped_dir(p, own_data)
+        reason = _is_skipped_dir(p, own_data, root=root)
         if reason:
             # A whole excluded tree is expected noise, not a per-file finding.
             excluded[reason] = excluded.get(reason, 0) + 1

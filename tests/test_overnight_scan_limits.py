@@ -251,3 +251,35 @@ class TestDirectIngestHonoursTheFixtureExclusion:
         path.write_text("real research")
 
         assert [p.name for p in discover(tmp_path)] == ["fieldnotes.md"]
+
+    def test_pointing_straight_at_a_fixture_directory_still_ingests_it(self, tmp_path):
+        """Asking for it by name is not the same as sweeping it up.
+
+        The rule exists so `sb ingest ~/Projects/second-brain` does not walk the
+        fabricated documents into the owner's corpus. It must not also stop the
+        benchmark building its own throwaway collection — `sb eval
+        --ingest-corpus` points at `evals/corpus-hard` directly, which is an
+        explicit request for exactly that directory.
+
+        Getting this wrong is not theoretical: the first version of the
+        exclusion silently reduced `sb eval --ingest-corpus` to a no-op, and the
+        hard benchmark went on reporting 14/18 because the collection still held
+        the previous run's chunks. On a reset collection it scored 0/18.
+        """
+        from secondbrain.ingest import discover
+
+        fixture = tmp_path / "evals" / "corpus-hard" / "invented.md"
+        fixture.parent.mkdir(parents=True)
+        fixture.write_text("# Gateway runbook\n\nThe budget alert fires at 80 percent.")
+
+        assert [p.name for p in discover(fixture.parent)] == ["invented.md"]
+        assert [p.name for p in discover(tmp_path)] == [], "but sweeping the tree must not take it"
+
+    def test_a_file_named_directly_inside_a_fixture_directory_is_ingested(self, tmp_path):
+        from secondbrain.ingest import discover
+
+        fixture = tmp_path / "evals" / "corpus" / "one.md"
+        fixture.parent.mkdir(parents=True)
+        fixture.write_text("x")
+
+        assert [p.name for p in discover(fixture)] == ["one.md"]
