@@ -1,5 +1,69 @@
 # second-brain eval results
 
+## 2026-09-12 — a benchmark that can fail: passage recall, precision, distractors
+
+The regression set has scored 1.0 on every metric since it was written, which is
+a finding about the benchmark rather than about retrieval. Two real defects
+passed straight through it this week: a prompt change that cost two answer
+cases, and a backfill bug that truncated the keyword index to the first chunks
+of every long file. Neither moved a number.
+
+Three things were wrong with how it scored.
+
+**It scored files, not passages.** A case passed when any chunk of the right
+document came back. A document of 331 chunks scores a hit on chunk 0, so the
+truncation bug was invisible by construction. Cases may now name
+`expected_chunk_contains`: the phrase that actually answers the question has to
+appear in a chunk the reader will see.
+
+**Nothing cost anything for being wrong.** Precision was not merely unmeasured,
+it was unmeasurable, because no case declared what a wrong answer looked like.
+Cases may now name `forbidden_sources`, the near-miss documents they must not
+surface, and the summary reports precision and a distractor rate over the cases
+that named them.
+
+**The corpus was eight files of about 400 bytes.** Each question mapped to an
+obviously distinct document and there were no near misses to get wrong.
+
+`evals/hard.json` is the replacement: 20 documents, 20 cases, each targeting one
+specific way retrieval goes wrong — an answer far from the top of a long file, a
+near-miss sharing the query's vocabulary, a superseded document that still reads
+as authoritative, a query whose words appear nowhere in the answer, a rare
+identifier with no semantic neighbours, and non-ASCII text. The benchmark's own
+correctness is tested offline: a typo in a `forbidden_sources` path would name a
+document that can never be retrieved, so the case would pass every time while
+measuring nothing.
+
+Both benchmarks, same machine, same day, k=5, `SB_HYBRID=1`, Qdrant:
+
+| metric | regression (old) | hard (new) |
+|---|---:|---:|
+| retrieval_passed / cases | 22 / 22 | 14 / 18 |
+| retrieval_hit_rate | 100% | 77.8% |
+| mean_source_recall | 100% | 100% |
+| mrr | 1.000 | 0.852 |
+| mean_precision | 47.3% | 28.9% |
+| mean_passage_recall | not asked | 100% |
+| distractor_rate | not asked | 100% |
+
+**The headline is the distractor rate.** All four cases that named a near-miss
+document retrieved it, out of a corpus of twenty. Retrieval has no notion of
+supersession or recency: asked which agent owns QA, it returns the current
+routing document *and* the one marked "SUPERSEDED — do not action anything in
+this file", and the answer is then built from both. Asked for the offsite backup
+time it returns the local snapshot policy alongside. Source recall stays at
+100%, so every older metric says this is working perfectly.
+
+That is now a measured, reproducible number to drive down rather than a
+suspicion. It is not yet fixed, and no change in this session was made to chase
+it.
+
+Two secondary readings. Precision at 47.3% on the *old* benchmark says more than
+half of every answer's context is documents no case asked for; the old summary
+line could not show that either. And passage recall at 100% on the hard set is
+genuine good news: when the right document is retrieved, the chunk holding the
+answer comes with it.
+
 ## 2026-09-12 — persisted keyword index, RRF fusion, `limit` as a cap
 
 Benchmark: `evals/regression.json`, 26 cases against the throwaway
