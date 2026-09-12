@@ -83,3 +83,65 @@ def test_a_project_subprocess_never_inherits_the_loaded_secrets(monkeypatch):
     assert "QDRANT_API_KEY" not in env
     assert "SB_MCP_TOKEN" not in env
     assert env.get("PATH")
+
+
+class TestTransitions:
+    """A report of current state is a report nobody reads by the third night.
+
+    `health` printed the same "2 failed" every morning for weeks. Both failures
+    were by construction — a probe pointed at the wrong endpoint — and because
+    the report never distinguished "still failing" from "just started failing",
+    there was no way to notice the day something real broke. Alerting is about
+    change; state belongs below the fold.
+    """
+
+    def test_a_first_run_alerts_on_nothing(self, tmp_path, monkeypatch):
+        from secondbrain import health
+
+        monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [health.HealthCheck("llm", "fail", "down")])
+        res = health.run_health(output_dir=tmp_path)
+
+        assert res["transitions"]["new_fail"] == [], "nothing is 'newly' anything on a first run"
+        assert "no previous run" in res["markdown"].lower()
+
+    def test_a_failure_that_persists_is_not_re_alerted(self, tmp_path, monkeypatch):
+        from secondbrain import health
+
+        monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [health.HealthCheck("llm", "fail", "down")])
+        health.run_health(output_dir=tmp_path)
+        res = health.run_health(output_dir=tmp_path)
+
+        assert res["transitions"]["new_fail"] == []
+        assert res["transitions"]["unchanged"] == ["llm"]
+
+    def test_a_newly_failing_check_leads_the_report(self, tmp_path, monkeypatch):
+        from secondbrain import health
+
+        monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [health.HealthCheck("llm", "pass", "ok")])
+        health.run_health(output_dir=tmp_path)
+        monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [health.HealthCheck("llm", "fail", "gone")])
+        res = health.run_health(output_dir=tmp_path)
+
+        assert res["transitions"]["new_fail"] == ["llm"]
+        assert "1 check(s) newly failing" in res["markdown"]
+
+    def test_a_recovery_is_reported_too(self, tmp_path, monkeypatch):
+        from secondbrain import health
+
+        monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [health.HealthCheck("llm", "fail", "down")])
+        health.run_health(output_dir=tmp_path)
+        monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [health.HealthCheck("llm", "pass", "ok")])
+        res = health.run_health(output_dir=tmp_path)
+
+        assert res["transitions"]["recovered"] == ["llm"]
+
+
+class TestDeployedLabels:
+    def test_the_launchd_labels_come_from_the_plists_this_repo_ships(self):
+        """A hardcoded label can be green while the service that exists is down."""
+        from secondbrain.health import deployed_labels
+
+        labels = deployed_labels()
+
+        assert "com.secondbrain.mcp" in labels, labels
+        assert any("sb-web" in label for label in labels), labels
