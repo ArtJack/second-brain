@@ -18,7 +18,7 @@ from secondbrain.health import _service_checks, run_health
 
 
 def test_the_llm_probe_asks_the_configured_endpoint(monkeypatch):
-    import secondbrain.health as health
+    from secondbrain import health
 
     asked: list[str] = []
 
@@ -38,7 +38,7 @@ def test_the_llm_probe_asks_the_configured_endpoint(monkeypatch):
 
 
 def test_a_chroma_deployment_is_not_asked_about_qdrant(monkeypatch):
-    import secondbrain.health as health
+    from secondbrain import health
 
     monkeypatch.setattr(health, "_http_check", lambda name, url, *, timeout_s: health.HealthCheck(name, "pass", url))
     monkeypatch.setattr(health, "_launchd_check", lambda label: health.HealthCheck("launchd", "pass", "ok"))
@@ -50,7 +50,7 @@ def test_a_chroma_deployment_is_not_asked_about_qdrant(monkeypatch):
 
 
 def test_other_projects_are_not_built_or_tested_unless_asked(tmp_path, monkeypatch):
-    import secondbrain.health as health
+    from secondbrain import health
 
     ran: list[str] = []
     monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [health.HealthCheck("llm", "pass", "ok")])
@@ -71,7 +71,7 @@ def test_other_projects_are_not_built_or_tested_unless_asked(tmp_path, monkeypat
 
 
 def test_a_project_subprocess_never_inherits_the_loaded_secrets(monkeypatch):
-    import secondbrain.health as health
+    from secondbrain import health
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-not-a-real-key")
     monkeypatch.setenv("QDRANT_API_KEY", "qdrant-not-a-real-key")

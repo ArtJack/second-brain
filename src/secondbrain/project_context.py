@@ -448,7 +448,7 @@ def _excerpt(source: Path, limit: int = 1200) -> str:
             if lines and lines[-1] != "":
                 lines.append("")
             continue
-        if stripped.startswith("#") or stripped.startswith("- ") or len(stripped) > 25:
+        if stripped.startswith(("#", "- ")) or len(stripped) > 25:
             lines.append(stripped)
         if len("\n".join(lines)) >= limit:
             break

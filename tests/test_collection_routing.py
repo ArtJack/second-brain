@@ -59,7 +59,7 @@ def test_recall_routes_to_named_collection(monkeypatch):
 
 
 def test_ingest_paths_routes_to_named_collection(tmp_path, monkeypatch):
-    import secondbrain.ingest as ingest
+    from secondbrain import ingest
 
     captured = {}
 
@@ -88,7 +88,7 @@ def test_ingest_paths_routes_to_named_collection(tmp_path, monkeypatch):
 
 
 def test_learn_routes_to_named_collection(tmp_path, monkeypatch):
-    import secondbrain.memory as memory
+    from secondbrain import memory
 
     captured = {}
     path = tmp_path / "memory.md"
@@ -109,7 +109,7 @@ def test_learn_routes_to_named_collection(tmp_path, monkeypatch):
 
 
 def test_cli_global_collection_flows_to_recall(monkeypatch):
-    import secondbrain.cli as cli
+    from secondbrain import cli
 
     captured = {}
     monkeypatch.setattr(

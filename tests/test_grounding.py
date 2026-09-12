@@ -181,7 +181,7 @@ class TestProductionWiringCarriesTheSignal:
         """`/ask/stream` is what the web UI uses for interactive answers."""
         from fastapi.testclient import TestClient
 
-        import secondbrain.server as server
+        from secondbrain import server
 
         server._SESSIONS.clear()
         server._rate_hits.clear()

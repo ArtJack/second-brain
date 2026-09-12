@@ -14,14 +14,13 @@ from .agent import run_turn
 from .ask import ask as ask_fn
 from .ask import recall as recall_fn
 from .browser_check import DEFAULT_BROWSER_DIR, capture_url
-from .config import cfg
-from .config import collections_for
+from .config import cfg, collections_for
 from .evals import DEFAULT_BENCHMARK, load_benchmark, resolve_corpus_paths, run_benchmark, select_cases
 from .gc import GarbageCollectionRefused, collect_garbage
-from .ingest import ingest_paths, last_report
-from .keyword_index import rebuild_from_store
-from .intake import PRIVATE_EVAL_DIR, build_private_artifacts, reset_session, run_intake
 from .health import run_health
+from .ingest import ingest_paths, last_report
+from .intake import PRIVATE_EVAL_DIR, build_private_artifacts, reset_session, run_intake
+from .keyword_index import rebuild_from_store
 from .memory import learn as learn_memory
 from .morning import run_morning
 from .overnight import run_overnight
@@ -162,7 +161,7 @@ def see(
         raise typer.Exit(1)
     try:
         result = see_fn(image, question)
-    except Exception as exc:  # noqa: BLE001 — surface any backend error cleanly
+    except Exception as exc:
         console.print(f"[red]see failed:[/] {exc}")
         raise typer.Exit(1) from exc
     console.print(Panel(result, title=f"vision: {image}"))

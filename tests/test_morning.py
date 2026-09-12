@@ -106,12 +106,12 @@ def test_find_project_root_rolls_subfolders_up_to_repo(tmp_path):
 
 
 def test_run_morning_writes_markdown_with_injected_ask(tmp_path, monkeypatch):
-    import secondbrain.morning as morning
+    from secondbrain import morning
 
-    monkeypatch.setattr(morning, "_load_recent_runs", lambda: [])
-    monkeypatch.setattr(morning, "_recent_reports", lambda: [])
-    monkeypatch.setattr(morning, "_open_tasks", lambda: [])
-    monkeypatch.setattr(morning, "project_inventory", lambda: [])
+    monkeypatch.setattr(morning, "_load_recent_runs", list)
+    monkeypatch.setattr(morning, "_recent_reports", list)
+    monkeypatch.setattr(morning, "_open_tasks", list)
+    monkeypatch.setattr(morning, "project_inventory", list)
     monkeypatch.setattr(morning, "_latest_health_summary", lambda: None)
 
     def fake_ask(question, k):

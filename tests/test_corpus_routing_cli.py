@@ -28,7 +28,7 @@ def _no_ambient_collection_flag(monkeypatch):
     Another test in this suite invokes the CLI with that flag, and the global it
     leaves behind would make these assertions pass or fail by collection order.
     """
-    import secondbrain.cli as cli
+    from secondbrain import cli
 
     monkeypatch.setattr(cli, "_COLLECTION", None)
 
@@ -56,7 +56,7 @@ def test_an_unknown_corpus_is_refused_by_name():
 
 def test_ask_without_a_corpus_queries_exactly_what_it_queried_before(monkeypatch):
     """The regression this whole change must not cause."""
-    import secondbrain.cli as cli
+    from secondbrain import cli
 
     seen: list[object] = []
     monkeypatch.setattr(
@@ -72,7 +72,7 @@ def test_ask_without_a_corpus_queries_exactly_what_it_queried_before(monkeypatch
 
 
 def test_ask_with_reference_queries_the_reference_collection(monkeypatch):
-    import secondbrain.cli as cli
+    from secondbrain import cli
 
     seen: list[object] = []
     monkeypatch.setattr(
@@ -88,7 +88,7 @@ def test_ask_with_reference_queries_the_reference_collection(monkeypatch):
 
 
 def test_recall_forwards_the_corpus_too(monkeypatch):
-    import secondbrain.cli as cli
+    from secondbrain import cli
 
     seen: list[object] = []
     monkeypatch.setattr(
@@ -103,7 +103,7 @@ def test_recall_forwards_the_corpus_too(monkeypatch):
 
 
 def test_the_mcp_ask_tool_forwards_its_corpus(monkeypatch):
-    import secondbrain.mcp_server as mcp_server
+    from secondbrain import mcp_server
 
     seen: list[object] = []
 

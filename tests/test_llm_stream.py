@@ -8,7 +8,7 @@ def _chunk(text: str):
 
 
 def test_answer_stream_yields_text_deltas(monkeypatch):
-    import secondbrain.llm as llm
+    from secondbrain import llm
 
     class FakeCompletions:
         def create(self, **kwargs):

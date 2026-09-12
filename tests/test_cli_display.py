@@ -4,7 +4,7 @@ from io import StringIO
 
 from rich.console import Console
 
-import secondbrain.cli as cli
+from secondbrain import cli
 
 
 def test_print_answer_can_hide_sources(monkeypatch):

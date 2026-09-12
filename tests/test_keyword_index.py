@@ -123,7 +123,7 @@ def test_a_query_of_only_punctuation_returns_nothing_rather_than_raising(index):
 
 def test_keyword_query_falls_back_when_the_collection_was_never_indexed(tmp_path, monkeypatch):
     """Legacy collections predate the index and must keep working unchanged."""
-    import secondbrain.hybrid as hybrid
+    from secondbrain import hybrid
 
     monkeypatch.setattr(hybrid, "_index", KeywordIndex(tmp_path / "empty.sqlite3"))
 
@@ -144,7 +144,7 @@ def test_keyword_query_falls_back_when_the_collection_was_never_indexed(tmp_path
 
 
 def test_keyword_query_prefers_the_index_over_scanning(tmp_path, monkeypatch):
-    import secondbrain.hybrid as hybrid
+    from secondbrain import hybrid
 
     index = KeywordIndex(tmp_path / "populated.sqlite3")
     index.upsert_chunks("indexed", _rows(("/indexed.md", 0, "the gateway routes model calls")))

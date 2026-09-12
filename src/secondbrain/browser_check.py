@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-
 DEFAULT_BROWSER_DIR = Path("/Volumes/DISK/AI/artjeck/inbox/browser")
 
 

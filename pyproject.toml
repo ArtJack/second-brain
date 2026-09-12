@@ -39,3 +39,36 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# Chosen to catch real defects and keep imports honest, not to impose a style.
+# A linter that fires 99 times on a working codebase gets switched off, so the
+# selection is small enough that zero is the normal state and a new finding means
+# something.
+select = ["E", "F", "I", "UP", "B", "PIE", "PLR0402", "RUF", "FLY", "SIM117"]
+ignore = [
+    # typer's whole API is `x: T = typer.Option(...)` in the signature. This rule
+    # is right in general and wrong for every CLI command in this project.
+    "B008",
+    # Long lines are usually a comment explaining why, and wrapping those hurts.
+    "E501",
+    # Both remaining hits are deliberate. `›` is a separator glyph in CLI output,
+    # and the Cyrillic `а` sits inside a character class that exists precisely to
+    # match Russian text — the rule is right in general and wrong on both.
+    "RUF001",
+    # `class Corpus(str, Enum)` is what FastAPI and pydantic serialise today.
+    # StrEnum is equivalent on 3.11+, but this enum is the public web API's
+    # corpus contract and is not worth re-testing for a style point.
+    "UP042",
+    # The one hit is a list of help lines joined for display; an f-string there
+    # would be longer and harder to edit.
+    "FLY002",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests name their fixtures and fakes for the reader, not the import sorter.
+"tests/*" = ["E402"]
