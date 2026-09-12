@@ -12,7 +12,7 @@ import json
 import os
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -261,16 +261,37 @@ def _is_under_skip_dir(path: Path, skip_dirs: set[str]) -> bool:
     return excluded_dir_rule(path.parts, skip_dirs) is not None
 
 
-def discover_targets(config: dict[str, Any]) -> list[Path]:
-    targets: list[Path] = []
+def discover_targets(config: dict[str, Any]) -> list[tuple[Path, str | None]]:
+    """Each existing target, paired with the collection it belongs to.
+
+    A target is normally a string, meaning the default collection. It may
+    instead be `{"path": ..., "collection": ...}`, which is what lets the
+    reference corpus have an automatic refresh again: the split that separated
+    study material from the owner's own notes had to be protected by excluding
+    `istqb` from the scan entirely, because the worker ingested everything into
+    the default collection and the next nightly would have undone it. That
+    exclusion bought safety by leaving the reference corpus with nothing
+    updating it at all.
+
+    String targets are the common case and the live config is hand-edited, so
+    they keep working untouched.
+    """
+    targets: list[tuple[Path, str | None]] = []
     seen: set[Path] = set()
     for raw in config.get("targets", []):
-        path = Path(str(raw)).expanduser()
+        if isinstance(raw, dict):
+            spec = raw.get("path")
+            collection = raw.get("collection") or None
+        else:
+            spec, collection = raw, None
+        if not spec:
+            continue
+        path = Path(str(spec)).expanduser()
         if not path.exists():
             continue
         resolved = path.resolve()
         if resolved not in seen:
-            targets.append(resolved)
+            targets.append((resolved, str(collection) if collection else None))
             seen.add(resolved)
     return targets
 
@@ -288,6 +309,12 @@ def _excluded_by_glob(name: str, globs: list[str]) -> str | None:
 class ScanResult:
     files: list[Path]
     skipped: list[dict[str, str]]
+    # Only the files whose target named a collection. Absent means the default,
+    # which keeps every existing caller and every string target unchanged.
+    routed: dict[str, str] = field(default_factory=dict)
+
+    def collection_for(self, path: Path | str) -> str | None:
+        return self.routed.get(str(path))
 
 
 def _is_foreign_memory(path: Path) -> bool:
@@ -319,8 +346,9 @@ def scan_targets(config: dict[str, Any]) -> ScanResult:
     max_bytes = int(config.get("max_file_mb", DEFAULT_CONFIG["max_file_mb"])) * 1024 * 1024
     files: list[Path] = []
     skipped: list[dict[str, str]] = []
+    routed: dict[str, str] = {}
 
-    def consider(path: Path) -> None:
+    def consider(path: Path, collection: str | None) -> None:
         if path.suffix.lower() not in SUPPORTED:
             return
         if _is_foreign_memory(path):
@@ -338,10 +366,12 @@ def scan_targets(config: dict[str, Any]) -> ScanResult:
             skipped.append({"path": str(path), "rule": f"unreadable: {exc.strerror or exc}"})
             return
         files.append(path)
+        if collection:
+            routed[str(path)] = collection
 
-    for target in discover_targets(config):
+    for target, target_collection in discover_targets(config):
         if target.is_file():
-            consider(target)
+            consider(target, target_collection)
             continue
         for dirpath, dirnames, filenames in os.walk(target):
             # Pruning in place stops the walk descending into an excluded tree
@@ -358,9 +388,13 @@ def scan_targets(config: dict[str, Any]) -> ScanResult:
             if _is_under_skip_dir(here, skip_dirs):
                 continue
             for name in filenames:
-                consider(here / name)
+                consider(here / name, target_collection)
 
-    return ScanResult(files=sorted(files), skipped=sorted(skipped, key=lambda item: item["path"]))
+    return ScanResult(
+        files=sorted(files),
+        skipped=sorted(skipped, key=lambda item: item["path"]),
+        routed=routed,
+    )
 
 
 def discover_supported_files(config: dict[str, Any]) -> list[Path]:
@@ -402,9 +436,9 @@ def _snippet(text: str, limit: int = 360) -> str:
     return compact[: limit - 3].rsplit(" ", 1)[0] + "..."
 
 
-def _ingest_one(path: Path) -> int:
+def _ingest_one(path: Path, collection: str | None = None) -> int:
     chunks = 0
-    for _file, n in ingest_paths(path):
+    for _file, n in ingest_paths(path, collection=collection):
         chunks += n
     return chunks
 
@@ -442,7 +476,7 @@ def run_overnight(*, root: Path | None = None, dry_run: bool = False) -> dict[st
             is_prose = path.suffix.lower() in TASK_SOURCE_SUFFIXES
             tasks = extract_tasks(text) if is_prose else []
             mentions = extract_mentions(text) if is_prose else []
-            chunks = 0 if dry_run else _ingest_one(path)
+            chunks = 0 if dry_run else _ingest_one(path, scan.collection_for(path))
             if not dry_run:
                 state.remember_file(path, sha, stat.st_size, stat.st_mtime, chunks)
             stats["ingested"] += 0 if dry_run else 1
@@ -453,6 +487,7 @@ def run_overnight(*, root: Path | None = None, dry_run: bool = False) -> dict[st
                     "chunks": chunks,
                     "tasks": tasks,
                     "mentions": mentions,
+                    "collection": scan.collection_for(path),
                     "snippet": _snippet(text),
                 }
             )
@@ -526,6 +561,9 @@ def write_report(
                 "",
                 f"- Size: {item['size']} bytes",
                 f"- Chunks: {item['chunks']}",
+                # Named only when it is not the default, so the common case
+                # stays as quiet in the report as it is in the config.
+                *([f"- Collection: {item['collection']}"] if item.get("collection") else []),
                 f"- Snippet: {item['snippet'] or '(no readable text)'}",
                 "",
             ]
