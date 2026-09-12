@@ -13,7 +13,7 @@ from secondbrain.citations import grounding
 def test_ask_shapes_citations(monkeypatch):
     from secondbrain import mcp_server as m
 
-    def fake_ask(question, k=None):
+    def fake_ask(question, k=None, collection=None):
         assert question == "q"
         assert k is None  # top_k=0 -> None (use configured default)
         return {
@@ -40,7 +40,7 @@ def test_ask_passes_top_k(monkeypatch):
     monkeypatch.setattr(
         m,
         "ask_fn",
-        lambda q, k=None: seen.update(k=k)
+        lambda q, k=None, collection=None: seen.update(k=k)
         or {"answer": "", "sources": [], "grounding": grounding("", 0)},
     )
     m.ask("q", top_k=7)

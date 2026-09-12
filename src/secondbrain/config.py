@@ -28,6 +28,11 @@ class Config:
         self.memory_dir: Path = Path(os.getenv("SB_MEMORY_DIR") or (_ROOT / "data" / "memory"))
         self.state_db: Path = Path(os.getenv("SB_STATE_DB") or (_ROOT / "data" / "artjeck.sqlite3"))
         self.collection: str = os.getenv("SB_COLLECTION", "second_brain")
+        # Reference material — study texts, standards, other people's documentation —
+        # kept apart from the owner's own notes. Mixed into one collection it wins on
+        # volume: 2,935 of 4,483 chunks were ISTQB syllabus PDFs on 2026-09-12, and
+        # they answered questions that were about this system.
+        self.reference_collection: str = os.getenv("SB_REFERENCE_COLLECTION", "second_brain_reference")
         self.qdrant_url: str = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
         self.qdrant_api_key: str | None = os.getenv("QDRANT_API_KEY") or None
         self.chunk_size: int = int(os.getenv("SB_CHUNK_SIZE", "1200"))
@@ -43,3 +48,20 @@ class Config:
 
 
 cfg = Config()
+
+
+def collections_for(corpus: str | None) -> list[str]:
+    """Which collections a named corpus means, in the order they should be searched.
+
+    Mirrors the web API's `corpus` field so the CLI, the MCP server and the HTTP
+    layer all speak the same word. `None` is `personal`, so every existing caller
+    keeps the exact behaviour it had before this existed.
+    """
+    name = (corpus or "personal").strip().lower()
+    if name == "personal":
+        return [cfg.collection]
+    if name == "reference":
+        return [cfg.reference_collection]
+    if name == "all":
+        return [cfg.collection, cfg.reference_collection]
+    raise ValueError(f"unknown corpus {corpus!r}; expected one of: personal, reference, all")
