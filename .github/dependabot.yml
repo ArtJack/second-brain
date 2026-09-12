@@ -1,0 +1,42 @@
+# Both locks went unaudited from the first commit until 2026-09-12, by which
+# point they carried eight advisory classes on the Python side and a critical on
+# the web side. Alerts alone would have surfaced those; the weekly update PRs are
+# what keeps them from accumulating again.
+#
+# Grouped so a quiet week is one PR, not nine. Majors are excluded on purpose:
+# `mcp` is the 24/7 server's protocol library and `next` is the deployed demo,
+# and neither should cross a major version as a side effect of a routine bump.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      web-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
