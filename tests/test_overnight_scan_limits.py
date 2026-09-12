@@ -121,11 +121,12 @@ def test_a_skipped_file_is_counted_in_the_run_stats(tmp_path):
 class TestBenchmarkFixturesAreNotMemories:
     """Invented documents must never enter the corpus the owner asks questions of.
 
-    The evaluation corpora are fiction. `evals/corpus-hard/runbook-gateway.md`
-    says "the gateway's budget alert fires at 80 percent of the monthly cap" and
-    `backup-offsite.md` says restic runs at 03:30 — numbers written to be *found*
-    by a benchmark, not because anyone measured them. They are shaped exactly
-    like the owner's real notes, because that is what makes them useful fixtures.
+    The evaluation corpora are fiction. Each fixture states specific, invented
+    numbers — a budget-alert threshold, a backup time, a key generation — written
+    to be *found* by a benchmark, not because anyone measured them. They are
+    shaped exactly like the owner's real notes, because that is what makes them
+    useful fixtures. None of those numbers is repeated here: this test file is
+    ingested into the brain too, and quoting them is how they leaked back in.
 
     They were being ingested into the real collection. Asked "where does the
     gateway run", the brain cited `evals/corpus-hard/runbook-gateway.md` as a
@@ -142,7 +143,7 @@ class TestBenchmarkFixturesAreNotMemories:
         for name in ("corpus", "corpus-hard"):
             fixture = tmp_path / "evals" / name / "invented.md"
             fixture.parent.mkdir(parents=True)
-            fixture.write_text("# Gateway runbook\n\nThe budget alert fires at 80 percent.")
+            fixture.write_text("# Fixture\n\nInvented content for an exclusion test.")
 
         result = overnight.scan_targets({"targets": [str(tmp_path)]})
 
@@ -270,7 +271,7 @@ class TestDirectIngestHonoursTheFixtureExclusion:
 
         fixture = tmp_path / "evals" / "corpus-hard" / "invented.md"
         fixture.parent.mkdir(parents=True)
-        fixture.write_text("# Gateway runbook\n\nThe budget alert fires at 80 percent.")
+        fixture.write_text("# Fixture\n\nInvented content for an exclusion test.")
 
         assert [p.name for p in discover(fixture.parent)] == ["invented.md"]
         assert [p.name for p in discover(tmp_path)] == [], "but sweeping the tree must not take it"
@@ -290,9 +291,8 @@ class TestTheBenchmarkDefinitionsAreFixturesToo:
 
     Excluding `evals/corpus-hard/` kept the fabricated runbook out. It did not
     keep out `evals/hard.json`, which stores each invented claim *directly
-    beside a verbatim copy of the question it answers* — an expected-answer
-    field saying "80" next to "At what point does the gateway budget alert
-    fire?". As retrieval material that is worse than the prose, not better.
+    beside a verbatim copy of the question it answers*. As retrieval material
+    that is worse than the prose, not better.
 
     I argued last night that they "read as configuration rather than as notes",
     and that is a claim about a human squinting at a citation, not about what

@@ -267,22 +267,22 @@ class TestPassageAndDistractorScoring:
 
     def test_a_case_fails_when_the_right_file_arrives_without_the_answering_passage(self):
         report = run_benchmark(
-            _benchmark([_case(expected_chunk_contains=["restic runs at 02:00"])]),
-            retrieve_fn=lambda q, k: [self._hit("notes/lab.md", "an early section about backups")],
+            _benchmark([_case(expected_chunk_contains=["fixture-token alpha runs at step 7"])]),
+            retrieve_fn=lambda q, k: [self._hit("notes/lab.md", "an early synthetic section")],
         )
 
         case = report["cases"][0]["retrieval"]
         assert case["source_recall"] == 1.0, "the file itself was retrieved"
         assert case["passage_recall"] == 0.0
         assert case["passed"] is False, "finding the document is not answering the question"
-        assert case["missing_passages"] == ["restic runs at 02:00"]
+        assert case["missing_passages"] == ["fixture-token alpha runs at step 7"]
 
     def test_a_case_passes_when_the_answering_passage_is_in_any_retrieved_chunk(self):
         report = run_benchmark(
-            _benchmark([_case(expected_chunk_contains=["restic runs at 02:00"])]),
+            _benchmark([_case(expected_chunk_contains=["fixture-token alpha runs at step 7"])]),
             retrieve_fn=lambda q, k: [
                 self._hit("notes/lab.md", "intro"),
-                self._hit("notes/lab.md", "The offsite copy: restic runs at 02:00 daily."),
+                self._hit("notes/lab.md", "The synthetic chunk: fixture-token alpha runs at step 7 here."),
             ],
         )
 
@@ -292,8 +292,8 @@ class TestPassageAndDistractorScoring:
 
     def test_passage_matching_ignores_case_and_surrounding_whitespace(self):
         report = run_benchmark(
-            _benchmark([_case(expected_chunk_contains=["Restic Runs At 02:00"])]),
-            retrieve_fn=lambda q, k: [self._hit("notes/lab.md", "...restic  runs\nat 02:00...")],
+            _benchmark([_case(expected_chunk_contains=["Fixture-Token Alpha Runs At Step 7"])]),
+            retrieve_fn=lambda q, k: [self._hit("notes/lab.md", "...fixture-token  alpha runs\nat step 7...")],
         )
 
         assert report["cases"][0]["retrieval"]["passage_recall"] == 1.0
