@@ -33,9 +33,8 @@ def test_nested_spans_produce_ordered_trajectory():
 def test_span_context_records_operational_error():
     trace = TraceRecorder("test.trace")
 
-    with pytest.raises(RuntimeError, match="offline"):
-        with trace.span("retrieve", kind="retrieval"):
-            raise RuntimeError("offline")
+    with pytest.raises(RuntimeError, match="offline"), trace.span("retrieve", kind="retrieval"):
+        raise RuntimeError("offline")
     trace.finish(status="error")
 
     record = trace.to_dict()

@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .citations import invalid_citations
 from .config import cfg
@@ -273,14 +274,14 @@ def render_morning_markdown(
         lines.append("Skipped; run with `--rag` to ask the indexed brain.")
     elif not answers:
         lines.append("No RAG questions were run.")
-    for answer in answers:
-        lines.append(f"### {answer['question']}")
+    for item in answers:
+        lines.append(f"### {item['question']}")
         lines.append("")
-        if answer["error"]:
-            lines.append(f"Failed: {answer['error']}")
+        if item["error"]:
+            lines.append(f"Failed: {item['error']}")
         else:
-            lines.append(answer["answer"] or "(empty answer)")
-            source_lines = _format_sources(answer["sources"])
+            lines.append(item["answer"] or "(empty answer)")
+            source_lines = _format_sources(item["sources"])
             if source_lines:
                 lines.append("")
                 lines.append("Sources:")

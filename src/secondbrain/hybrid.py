@@ -150,7 +150,7 @@ def keyword_query(store, query: str, limit: int = 3) -> list[dict]:
     wants_list = _has_list_intent(query, tokens)
     scored: list[tuple[float, dict]] = []
 
-    for hit, words in zip(docs, tokenized):
+    for hit, words in zip(docs, tokenized, strict=True):
         if not words:
             continue
         doc = hit.get("document", "")

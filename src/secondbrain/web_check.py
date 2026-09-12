@@ -11,7 +11,6 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-
 DEFAULT_WEB_DIR = Path("/Volumes/DISK/AI/artjeck/inbox/web")
 MAX_BYTES = 2_000_000
 USER_AGENT = "ArtjeckSecondBrain/0.1 (+read-only web check)"

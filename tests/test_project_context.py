@@ -2,8 +2,8 @@ from secondbrain.project_context import (
     ProjectContext,
     collect_project_context,
     discover_project_roots,
-    render_project_context,
     render_active_projects_index,
+    render_project_context,
     write_project_context_notes,
 )
 

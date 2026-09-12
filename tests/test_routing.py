@@ -50,7 +50,7 @@ def test_small_talk_gets_direct_agent_reply():
 
 
 def test_weather_gets_direct_agent_reply(monkeypatch):
-    import secondbrain.agent as agent
+    from secondbrain import agent
 
     monkeypatch.setattr(agent, "format_weather", lambda location: f"weather for {location or 'default'}")
 

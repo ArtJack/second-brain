@@ -32,7 +32,7 @@ def _hermetic_web_env(monkeypatch):
 
 
 def _client():
-    import secondbrain.server as server
+    from secondbrain import server
 
     server._SESSIONS.clear()
     server._rate_hits.clear()

@@ -33,7 +33,7 @@ def test_project_command_uses_npm_build_when_no_test_script(tmp_path):
 
 
 def test_run_health_writes_report_with_patched_checks(tmp_path, monkeypatch):
-    import secondbrain.health as health
+    from secondbrain import health
 
     monkeypatch.setattr(health, "_service_checks", lambda timeout_s: [HealthCheck("ollama", "pass", "ok")])
     monkeypatch.setattr(health, "_project_checks", lambda timeout_s: [HealthCheck("project app", "skip", "no command")])

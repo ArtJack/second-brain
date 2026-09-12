@@ -152,7 +152,6 @@ def test_an_undecodable_file_does_not_stop_the_run(tmp_path, monkeypatch):
 
 def test_the_report_belongs_to_the_latest_run_only(tmp_path, monkeypatch):
     """A stale report read as current would misattribute one run's losses to another."""
-    import secondbrain.ingest as ingest_module
 
     (tmp_path / "photo.png").write_bytes(b"\x89PNG")
     discover(tmp_path)

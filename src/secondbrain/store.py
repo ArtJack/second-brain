@@ -44,8 +44,11 @@ class ChromaStore:
         )
         # Flatten Chroma's per-query nesting into a simple list of hits.
         hits = []
+        # strict: these are parallel arrays from one query. Different lengths
+        # would mean the store disagreed with itself, and zip's default is to
+        # quietly return the shorter answer.
         for doc, meta, dist in zip(
-            res["documents"][0], res["metadatas"][0], res["distances"][0]
+            res["documents"][0], res["metadatas"][0], res["distances"][0], strict=True
         ):
             hits.append({"document": doc, "metadata": meta, "distance": dist})
         return hits
@@ -60,7 +63,7 @@ class ChromaStore:
                 offset=offset,
                 include=["documents", "metadatas"],
             )
-            for doc, meta in zip(res.get("documents") or [], res.get("metadatas") or []):
+            for doc, meta in zip(res.get("documents") or [], res.get("metadatas") or [], strict=True):
                 hits.append({"document": doc or "", "metadata": meta or {}, "distance": 1.0})
         return hits
 
@@ -158,7 +161,7 @@ class QdrantStore:
             return
         self._ensure_collection(len(embeddings[0]))
         points = []
-        for source_id, vector, document, metadata in zip(ids, embeddings, documents, metadatas):
+        for source_id, vector, document, metadata in zip(ids, embeddings, documents, metadatas, strict=True):
             payload = dict(metadata)
             payload["source_id"] = source_id
             payload["document"] = document

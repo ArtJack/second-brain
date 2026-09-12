@@ -24,7 +24,7 @@ class Span:
 
     def __init__(
         self,
-        recorder: "TraceRecorder",
+        recorder: TraceRecorder,
         *,
         name: str,
         kind: str,
@@ -45,7 +45,7 @@ class Span:
         self._finished = False
         self.duration_ms: float | None = None
 
-    def __enter__(self) -> "Span":
+    def __enter__(self) -> Span:
         return self
 
     def __exit__(self, exc_type, exc, _traceback) -> None:

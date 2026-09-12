@@ -105,7 +105,7 @@ def test_the_web_app_under_test_has_no_ambient_cors_middleware() -> None:
     under test stops being the object CI tests. A `*` value raises at import and
     takes 17 tests down with it.
     """
-    import secondbrain.server as server
+    from secondbrain import server
 
     has_cors = any("CORS" in str(m) for m in server.app.user_middleware)
     assert not has_cors, (

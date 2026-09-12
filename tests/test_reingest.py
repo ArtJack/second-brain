@@ -47,7 +47,7 @@ def test_reingesting_a_shrunk_file_leaves_no_orphans(tmp_path):
 
 def test_ingest_paths_deletes_source_before_upsert(tmp_path, monkeypatch):
     """The pipeline must clear a file's prior chunks before writing new ones."""
-    import secondbrain.ingest as ingest
+    from secondbrain import ingest
 
     calls: list[tuple] = []
 
