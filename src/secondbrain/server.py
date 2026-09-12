@@ -85,7 +85,66 @@ class AuthContext:
         return self.kind == "owner"
 
 
-_SESSIONS: dict[str, str] = {}
+class _SessionStore:
+    """Anonymous session tokens, bounded in both count and lifetime.
+
+    This was a plain dict: anyone who could reach POST /session minted an entry
+    that stayed valid and resident for the life of the process. On a port exposed
+    through a tunnel that is a memory leak with an authentication bonus. Both
+    bounds are enforced lazily on access, so there is no background thread and no
+    change to how a request is authenticated.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[str, dict[str, float | str]] = {}
+
+    def _max(self) -> int:
+        try:
+            return max(1, int(_env("SB_WEB_SESSION_MAX", "500")))
+        except ValueError:
+            return 500
+
+    def _ttl(self) -> float:
+        try:
+            return float(_env("SB_WEB_SESSION_TTL_S", "86400"))
+        except ValueError:
+            return 86400.0
+
+    def mint(self, token: str, session_id: str) -> None:
+        self._entries[token] = {"session_id": session_id, "created_at": time.time()}
+        # Oldest out first. dicts preserve insertion order, and a re-minted token
+        # is re-inserted, so this is genuinely least-recently-created.
+        while len(self._entries) > self._max():
+            self._entries.pop(next(iter(self._entries)))
+
+    def lookup(self, token: str) -> str | None:
+        entry = self._entries.get(token)
+        if entry is None:
+            return None
+        if time.time() - float(entry["created_at"]) > self._ttl():
+            self._entries.pop(token, None)
+            return None
+        return str(entry["session_id"])
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+
+_SESSIONS = _SessionStore()
+
+# The health probe's last verdict, and when it was taken. /health is anonymous
+# and exempt from the limiter by design (the tunnel and the uptime monitor need a
+# pulse), so without this every caller — and every 30-second poll from every open
+# browser tab — bought an embedding on the lab GPU.
+_HEALTH_TTL_S = 60.0
+_health_cache: dict[str, object] = {"at": None, "result": None, "error": None}
+
+
+def _reset_health_cache() -> None:
+    _health_cache.update({"at": None, "result": None, "error": None})
 
 
 def _env(name: str, default: str = "") -> str:
@@ -130,7 +189,7 @@ def _auth_from_header(header: str | None) -> AuthContext:
     read_token = _env("SB_WEB_READ_TOKEN")
     if read_token and secrets.compare_digest(token, read_token):
         return AuthContext("service_read")
-    session_id = _SESSIONS.get(token)
+    session_id = _SESSIONS.lookup(token)
     if session_id:
         return AuthContext("anon_session", session_id=session_id)
     raise HTTPException(status_code=401, detail="unauthorized")
@@ -176,11 +235,13 @@ def _rate_limited(request: Request) -> bool:
     if len(hits) >= limit:
         return True
     hits.append(now)
-    # Bound the table: drop idle IPs once the dict grows past any plausible
-    # legitimate audience, so a scan across source addresses can't grow it
-    # without bound.
+    # Bound the table. The previous sweep deleted entries whose deque was empty,
+    # which inside a window is none of them — every key that had just been used
+    # held at least one timestamp — so a scan across source addresses grew the
+    # table without limit. Drop any key whose newest hit has fallen out of the
+    # window instead: those cannot affect a decision again.
     if len(_rate_hits) > 10_000:
-        for key in [k for k, v in _rate_hits.items() if not v]:
+        for key in [k for k, v in _rate_hits.items() if not v or now - v[-1] > _RATE_WINDOW_SECONDS]:
             del _rate_hits[key]
     return False
 
@@ -256,16 +317,34 @@ def _require_owner(auth: AuthContext) -> None:
 def create_session() -> dict:
     session_id = secrets.token_urlsafe(16)
     token = secrets.token_urlsafe(32)
-    _SESSIONS[token] = session_id
+    _SESSIONS.mint(token, session_id)
     return {"token": token, "session_id": session_id, "token_type": "bearer"}
 
 
 @app.get("/health")
 def health() -> dict:
+    """Liveness, with the model probe cached for a minute.
+
+    The store count is cheap and runs every time; the embedding call is not, and
+    this endpoint is anonymous and exempt from the rate limiter, so a burst — or
+    one browser tab polling every 30 seconds — used to mean a burst of GPU work.
+    The cached verdict includes failures, so an outage is still reported, just not
+    re-measured on every request.
+    """
     collection = _env("SB_WEB_PUBLIC_COLLECTION", "second_brain_public")
+    now = time.monotonic()
+    at = _health_cache["at"]
+    fresh = at is not None and (now - float(at)) < _HEALTH_TTL_S
+    if not fresh:
+        try:
+            embed(["health"])
+            _health_cache.update({"at": now, "result": True, "error": None})
+        except Exception as exc:
+            _health_cache.update({"at": now, "result": False, "error": str(exc)})
+    if not _health_cache["result"]:
+        raise HTTPException(status_code=503, detail=f"unavailable: {_health_cache['error']}")
     try:
         chunks = Store(collection=collection).count()
-        embed(["health"])
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"unavailable: {exc}") from exc
     return {"ok": True, "collection": collection, "chunks": chunks}
