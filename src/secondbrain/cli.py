@@ -18,7 +18,7 @@ from .config import cfg
 from .config import collections_for
 from .evals import DEFAULT_BENCHMARK, load_benchmark, resolve_corpus_paths, run_benchmark, select_cases
 from .gc import GarbageCollectionRefused, collect_garbage
-from .ingest import ingest_paths
+from .ingest import ingest_paths, last_report
 from .keyword_index import rebuild_from_store
 from .intake import PRIVATE_EVAL_DIR, build_private_artifacts, reset_session, run_intake
 from .health import run_health
@@ -93,7 +93,22 @@ def _ingest_path(path: str, reset: bool = False, collection: str | None = None) 
         files += 1
         chunks += n
         console.print(f"  [green]+[/] {f} [dim]({n} chunks)[/]")
-    return {"files": files, "chunks": chunks, "total": Store(collection=selected_collection).count()}
+    # Anything the run decided not to ingest is said out loud. Silence here is how
+    # "why is that note not in my brain?" became a question with no answer.
+    skipped = [item for item in last_report()["skipped"] if item["reason"] != "unsupported-suffix"]
+    unsupported = len(last_report()["skipped"]) - len(skipped)
+    for item in skipped[:10]:
+        console.print(f"  [yellow]-[/] {item['path']} [dim]({item['reason']})[/]")
+    if len(skipped) > 10:
+        console.print(f"  [yellow]-[/] [dim]...and {len(skipped) - 10} more[/]")
+    if unsupported:
+        console.print(f"  [dim]{unsupported} file(s) skipped: unsupported type[/]")
+    return {
+        "files": files,
+        "chunks": chunks,
+        "total": Store(collection=selected_collection).count(),
+        "skipped": len(skipped),
+    }
 
 
 @app.command()
@@ -108,14 +123,13 @@ def ingest(
     except RuntimeError as exc:
         console.print(f"[red]ingest failed:[/] {exc}")
         raise typer.Exit(1) from exc
-    console.print(
-        Panel(
-            f"Ingested [bold]{res['files']}[/] files / [bold]{res['chunks']}[/] chunks. "
-            f"Collection now holds [bold]{res['total']}[/] chunks.",
-            title="ingest complete",
-            border_style="green",
-        )
+    summary = (
+        f"Ingested [bold]{res['files']}[/] files / [bold]{res['chunks']}[/] chunks. "
+        f"Collection now holds [bold]{res['total']}[/] chunks."
     )
+    if res.get("skipped"):
+        summary += f"\n[yellow]{res['skipped']} file(s) skipped — listed above.[/]"
+    console.print(Panel(summary, title="ingest complete", border_style="green"))
 
 
 @app.command()
