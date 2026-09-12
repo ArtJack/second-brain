@@ -6,7 +6,6 @@ simple, robust, and easy to explain. (Semantic/recursive chunking is a documente
 from __future__ import annotations
 
 import re
-
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -334,10 +333,10 @@ def ingest_paths(path: str | Path, reset: bool = False, collection: str | None =
             if chunk.page:
                 meta["page"] = chunk.page
             metadatas.append(meta)
-        # Embedded with the header, stored without it. Retrieval matches against
-        # "Gateway runbook › Restarting" as well as the body, which is how a
-        # chunk reading "stop the launchd job" becomes findable as a *gateway*
-        # instruction; the citation still quotes only what the owner wrote.
+        # Embedded with the header, stored without it. Retrieval matches the
+        # document title and section as well as the body, which is how a chunk
+        # reading "stop the launchd job" becomes findable as a *gateway*
+        # instruction. The citation still quotes only what the owner wrote.
         store.upsert(
             ids=ids,
             embeddings=embed([chunk.embedded for chunk in chunks]),
