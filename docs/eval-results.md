@@ -1,5 +1,44 @@
 # second-brain eval results
 
+## 2026-09-12 — contextual chunk headers
+
+Each chunk is now embedded and keyword-indexed with a header line naming its
+document and the section it sits under — `Gateway runbook › Restarting` — while
+the stored body, and therefore anything a citation quotes, is unchanged. The
+chunk bodies are byte-identical to what shipped before, which a test pins: this
+adds orientation, it does not re-cut the document.
+
+Measured on both benchmarks, same machine, k=5, `SB_HYBRID=1`, Qdrant, corpora
+re-ingested for each reading.
+
+| metric | hard before | hard after | regression before | regression after |
+|---|---:|---:|---:|---:|
+| passed / cases | 14 / 18 | 14 / 18 | 22 / 22 | 22 / 22 |
+| hit_rate | 77.8% | 77.8% | 100% | 100% |
+| source_recall | 100% | 100% | 100% | 100% |
+| mrr | 0.852 | **0.870** | 1.000 | 1.000 |
+| mean_precision | 28.9% | **31.1%** | 47.3% | 47.3% |
+| passage_recall | 100% | 100% | not asked | not asked |
+| distractor_rate | 100% | 100% | not asked | not asked |
+
+A small, real gain on the hard set and no movement on the saturated one, which
+is what the gate asked for. The honest reading is that this is a modest change:
+ranking improved slightly and nothing regressed.
+
+**It did not touch the distractor problem, and there is a reason worth writing
+down.** The superseded document's own H1 is "QA routing (SUPERSEDED — kept as
+the record of what it used to be)", so every one of its chunks now carries the
+word SUPERSEDED into both the embedding and the keyword index. The signal is
+present in the index for the first time. Nothing reads it. A demotion rule for
+documents that declare themselves superseded is the obvious next step, and it is
+deliberately not in this change: it is a ranking change and it deserves its own
+before-and-after rather than being folded into a chunking one.
+
+This change alters embeddings, so it is a re-ingest, not an in-place migration.
+The keyword index gains a `header` column; a table built on the older schema is
+dropped and refilled by the next ingest or by `sb keyword-reindex` rather than
+failing on insert.
+
 ## 2026-09-12 — a benchmark that can fail: passage recall, precision, distractors
 
 The regression set has scored 1.0 on every metric since it was written, which is
