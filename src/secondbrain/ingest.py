@@ -5,9 +5,11 @@ simple, robust, and easy to explain. (Semantic/recursive chunking is a documente
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import cfg
@@ -199,6 +201,107 @@ def chunk_document(
     return chunks
 
 
+_ID_PREFIX = "c:"
+_ID_LENGTH = 32
+
+
+def normalised(text: str) -> str:
+    """The form a chunk is hashed in.
+
+    Leading and trailing space stripped and internal runs of whitespace
+    collapsed to one, so the same sentence reflowed by an editor keeps its
+    identity. Case is deliberately preserved: "Gateway" and "gateway" are
+    different text and a citation should be able to tell them apart.
+    """
+    return " ".join(str(text).split())
+
+
+def chunk_id(text: str) -> str:
+    """Identity derived from content, not from where the content was found.
+
+    The path was doing this job, which made a copied file a second corpus and
+    made every web ingest a fresh document under a temporary directory that no
+    longer existed by the time anyone read the citation.
+    """
+    digest = hashlib.sha256(normalised(text).encode("utf-8")).hexdigest()
+    return f"{_ID_PREFIX}{digest[:_ID_LENGTH]}"
+
+
+def _payload(chunk, index: int, *, path: str, doc_type: str, mtime: float) -> dict:
+    meta = {
+        "path": path,
+        # Kept as an alias of `path` so hybrid, ask, citations and the web UI
+        # keep reading the key they have always read. Removing it is a separate
+        # change to every read site, not a side effect of this one.
+        "source": path,
+        "name": Path(path).name or path,
+        "chunk": index,
+        "doc_type": doc_type,
+        "mtime": mtime,
+        "ingested_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "title": chunk.title,
+        "header": chunk.header,
+    }
+    if chunk.section:
+        meta["section"] = chunk.section
+    if chunk.page:
+        meta["page"] = chunk.page
+    return meta
+
+
+def ingest_text(
+    text: str,
+    *,
+    source: str,
+    doc_type: str = "text",
+    collection: str | None = None,
+) -> int:
+    """Ingest text the caller already holds, under the logical source it names.
+
+    The web endpoint used to write the body to a temporary file and ingest that,
+    so the stored source was a `/var/folders/...` path unique to one request.
+    Nothing could ever match it again: re-posting the same document added a
+    second copy, and the citation a reader clicked pointed at a file deleted
+    when the request ended.
+    """
+    store = Store(collection=collection)
+    index_name = getattr(store, "collection_name", None) or collection or cfg.collection
+    chunks = chunk_document(text, cfg.chunk_size, cfg.chunk_overlap, name=Path(source).name or source)
+    store.delete_source(source)
+    _index.delete_source(index_name, source)
+    if not chunks:
+        return 0
+    _write_chunks(store, index_name, chunks, path=source, doc_type=doc_type, mtime=0.0)
+    return len(chunks)
+
+
+def _write_chunks(store, index_name: str, chunks, *, path: str, doc_type: str, mtime: float) -> None:
+    """The one place a chunk becomes a point, so both stores always agree."""
+    store.upsert(
+        ids=[chunk_id(chunk.body) for chunk in chunks],
+        # Embedded with the header, stored without it.
+        embeddings=embed([chunk.embedded for chunk in chunks]),
+        documents=[chunk.body for chunk in chunks],
+        metadatas=[
+            _payload(chunk, i, path=path, doc_type=doc_type, mtime=mtime)
+            for i, chunk in enumerate(chunks)
+        ],
+    )
+    _index.upsert_chunks(
+        index_name,
+        [
+            {
+                "source": path,
+                "chunk": i,
+                "name": Path(path).name or path,
+                "header": chunk.header,
+                "document": chunk.body,
+            }
+            for i, chunk in enumerate(chunks)
+        ],
+    )
+
+
 def read_pages(path: Path) -> tuple[str, list[int]]:
     """A PDF's text plus the offset each page starts at.
 
@@ -318,42 +421,12 @@ def ingest_paths(path: str | Path, reset: bool = False, collection: str | None =
         if not chunks:
             _note_skip(f, "no-content")
             continue
-        ids = [f"{src}#{i}" for i in range(len(chunks))]
-        metadatas = []
-        for i, chunk in enumerate(chunks):
-            meta = {
-                "source": src,
-                "name": f.name,
-                "chunk": i,
-                "title": chunk.title,
-                "header": chunk.header,
-            }
-            if chunk.section:
-                meta["section"] = chunk.section
-            if chunk.page:
-                meta["page"] = chunk.page
-            metadatas.append(meta)
-        # Embedded with the header, stored without it. Retrieval matches the
-        # document title and section as well as the body, which is how a chunk
-        # reading "stop the launchd job" becomes findable as a *gateway*
-        # instruction. The citation still quotes only what the owner wrote.
-        store.upsert(
-            ids=ids,
-            embeddings=embed([chunk.embedded for chunk in chunks]),
-            documents=[chunk.body for chunk in chunks],
-            metadatas=metadatas,
-        )
-        _index.upsert_chunks(
+        _write_chunks(
+            store,
             index_name,
-            [
-                {
-                    "source": src,
-                    "chunk": i,
-                    "name": f.name,
-                    "header": chunk.header,
-                    "document": chunk.body,
-                }
-                for i, chunk in enumerate(chunks)
-            ],
+            chunks,
+            path=src,
+            doc_type=f.suffix.lstrip(".").lower() or "text",
+            mtime=f.stat().st_mtime,
         )
         yield f, len(chunks)
