@@ -38,3 +38,50 @@ models (`chat`/`embed`) by default, optional paid escalation behind a budget cap
 ## 4. Testing & evaluation
 - Unit/integration tests on ingest + retrieval.
 - Eval harness grades answers against a fixed set (coverage, grounding, citation correctness).
+
+## 5. Chunk identity, and how to migrate a collection to it
+
+A chunk's id is a hash of its normalised text: whitespace collapsed, case left
+alone, sha256 truncated to 32 hex characters behind a `c:` prefix. Location is
+payload — `path`, plus `mtime`, `doc_type`, `ingested_at`, `title` — and `source`
+remains as an alias of `path` so every existing read site keeps working.
+
+Identity used to be the filesystem path captured at ingest time, which made
+location and identity the same thing. Copying a file created a second corpus,
+and the web endpoint, which wrote each request body into a temporary directory,
+created a brand new document per request whose citation pointed at a path that
+no longer existed. `sb gc` compounds that: those paths genuinely are missing, so
+the sweep reads web-ingested material as deleted.
+
+### Migrating an existing collection
+
+Do **not** mutate the live collection in place. Ingest into a fresh one, verify,
+then swap.
+
+```bash
+# 1. Snapshot first. It is one curl and it is the only way back.
+sb health --json | grep -i qdrant
+
+# 2. Full re-ingest into a new collection.
+SB_COLLECTION=second_brain_v2 sb ingest ~/Projects --reset
+
+# 3. Verify: the count should be at or below the old one, never above.
+sb --collection second_brain status
+sb --collection second_brain_v2 status
+
+# 4. Spot-check a query that has a known answer.
+sb --collection second_brain_v2 ask "where does the gateway run?"
+
+# 5. Rebuild the keyword index for the new collection.
+SB_COLLECTION=second_brain_v2 sb keyword-reindex
+
+# 6. Swap by changing SB_COLLECTION in the service environment, then restart
+#    the service. Keep the old collection until the next nightly has run clean.
+```
+
+A count that comes back *higher* than the old collection means identity is not
+collapsing duplicates as intended. Stop and find out why before swapping.
+
+Re-ingest is also required by the contextual chunk headers, since those change
+what is embedded. The two migrations are the same operation and should be done
+once, together.

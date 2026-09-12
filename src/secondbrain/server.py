@@ -4,12 +4,10 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import tempfile
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -22,7 +20,7 @@ from .ask import recall as recall_fn
 from .citations import grounding, invalid_citations
 from .config import cfg
 from .hybrid import hybrid_retrieve
-from .ingest import ingest_paths
+from .ingest import ingest_text
 from .llm import answer_stream, embed
 from .memory import learn as learn_memory
 from .store import Store
@@ -455,25 +453,26 @@ def ask_stream(req: AskRequest, auth: AuthContext = Depends(auth_context)) -> St
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
-def _temp_source_name(source: str) -> str:
-    name = Path(source).name.strip() or "web-ingest.md"
-    if "." not in name:
-        name += ".md"
-    return name
-
-
 @app.post("/ingest")
 def ingest(req: TextIngestRequest, auth: AuthContext = Depends(auth_context)) -> dict:
+    """Ingest posted text under the source the caller names.
+
+    This used to write the body into a TemporaryDirectory and ingest that file,
+    which made the stored source a `/var/folders/...` path unique to one
+    request. Nothing could match it again: the same document posted twice added
+    a second copy every time, and the citation a reader clicked pointed at a
+    file that was deleted when the request ended. `sb gc` then compounded it,
+    because those paths really are missing and the sweep reads them as deleted.
+    """
     collection = _collection_for(req.corpus, auth, write=True)
-    files = chunks = 0
-    with tempfile.TemporaryDirectory(prefix="secondbrain-web-") as tmp:
-        path = Path(tmp) / _temp_source_name(req.source)
-        path.write_text(req.text, encoding="utf-8")
-        for _file, n in ingest_paths(path, collection=collection):
-            files += 1
-            chunks += n
+    chunks = ingest_text(req.text, source=req.source, doc_type="web", collection=collection)
     total = Store(collection=collection).count()
-    return {"files": files, "chunks": chunks, "total": total, "collection": collection}
+    return {
+        "files": 1 if chunks else 0,
+        "chunks": chunks,
+        "total": total,
+        "collection": collection,
+    }
 
 
 @app.post("/learn")
