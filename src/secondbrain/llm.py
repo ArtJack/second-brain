@@ -12,7 +12,27 @@ from pathlib import Path
 
 from openai import BadRequestError, OpenAI
 
+from .citations import REFUSAL_MARKER
 from .config import cfg
+
+# One definition, used by both the batch and the streaming path. It lived in two
+# copies, so a change to one silently gave the streaming answer different rules
+# from the non-streaming one — on the single instruction this product is built on.
+SYSTEM_PROMPT = (
+    "You are the user's personal knowledge assistant. Answer the question using ONLY "
+    "the numbered context below. Cite the sources you used inline as [1], [2], etc.\n\n"
+    f"If — and only if — the numbered context does not contain the answer, begin your "
+    f"reply with '{REFUSAL_MARKER}' and one sentence saying what is missing. "
+    "Never use that marker when the context does answer the question. "
+    "Do not invent facts."
+)
+
+
+def _grounded_messages(question: str, context: str) -> list[dict]:
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
+    ]
 
 _client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key, timeout=cfg.llm_timeout_s, max_retries=1)
 
@@ -41,15 +61,9 @@ def embed(texts: list[str]) -> list[list[float]]:
 
 def answer(question: str, context: str) -> str:
     """Generate an answer grounded ONLY in the supplied context, with [n] citations."""
-    system = (
-        "You are the user's personal knowledge assistant. Answer the question using ONLY "
-        "the numbered context below. Cite the sources you used inline as [1], [2], etc. "
-        "If the context does not contain the answer, say so plainly — do not invent facts."
-    )
-    user = f"Context:\n{context}\n\nQuestion: {question}"
     resp = _client.chat.completions.create(
         model=cfg.chat_model,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        messages=_grounded_messages(question, context),
         temperature=0.1,
     )
     return resp.choices[0].message.content or ""
@@ -57,15 +71,9 @@ def answer(question: str, context: str) -> str:
 
 def answer_stream(question: str, context: str) -> Iterator[str]:
     """Stream an answer grounded ONLY in the supplied context, yielding text deltas."""
-    system = (
-        "You are the user's personal knowledge assistant. Answer the question using ONLY "
-        "the numbered context below. Cite the sources you used inline as [1], [2], etc. "
-        "If the context does not contain the answer, say so plainly — do not invent facts."
-    )
-    user = f"Context:\n{context}\n\nQuestion: {question}"
     stream = _client.chat.completions.create(
         model=cfg.chat_model,
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        messages=_grounded_messages(question, context),
         temperature=0.1,
         stream=True,
     )
