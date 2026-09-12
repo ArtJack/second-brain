@@ -1,6 +1,7 @@
 """Keyword retrieval alongside semantic vector search, and the fusion of the two."""
 from __future__ import annotations
 
+import logging
 import math
 import re
 import sqlite3
@@ -8,6 +9,7 @@ import sqlite3
 from .keyword_index import STOPWORDS, KeywordIndex
 
 # One index for the process. Tests replace this attribute directly.
+log = logging.getLogger("secondbrain.hybrid")
 _index = KeywordIndex()
 
 # Reciprocal-rank fusion's smoothing constant, from Cormack et al. (2009). It
@@ -133,10 +135,13 @@ def keyword_query(store, query: str, limit: int = 3) -> list[dict]:
         try:
             if _index.count(collection):
                 return _intent_boost(_index.query(collection, query, limit=limit), query, tokens)
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
             # Keyword search widens a hybrid answer; it is not a dependency of
             # one. An unreadable index costs the keyword half, where letting the
-            # error through costs the whole answer.
+            # error through costs the whole answer. But never silently: this is
+            # exactly how every answer went vector-only for hours on 2026-09-12
+            # without a single line in any log.
+            log.warning("keyword index unusable for %s, answering vector-only: %s", collection, exc)
             return []
     if not tokens:
         return []

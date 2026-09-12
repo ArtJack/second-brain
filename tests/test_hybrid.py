@@ -238,3 +238,33 @@ def test_neighbours_still_fill_slots_the_retrievers_left_empty():
 
     assert [h["metadata"]["source"] for h in hits] == ["/k.md", "/k.md", "/k.md"]
     assert [h.get("retrieval") for h in hits] == ["keyword", "keyword-adjacent", "keyword-adjacent"]
+
+
+def test_an_unusable_keyword_index_is_logged_not_silent(monkeypatch, caplog):
+    """Every answer went vector-only for hours on 2026-09-12 without a line in any log."""
+    import logging
+    import sqlite3
+
+    from secondbrain import hybrid
+
+    class BrokenIndex:
+        def count(self, collection):
+            return 1
+
+        def query(self, collection, query, limit=3):
+            raise sqlite3.OperationalError("no such column: header")
+
+    class LiveStore:
+        collection_name = "live"
+
+        def documents(self):
+            return []
+
+    monkeypatch.setattr(hybrid, "_index", BrokenIndex())
+
+    with caplog.at_level(logging.WARNING, logger="secondbrain.hybrid"):
+        hits = hybrid.keyword_query(LiveStore(), "gateway routing", limit=3)
+
+    assert hits == []
+    assert "no such column: header" in caplog.text
+    assert "live" in caplog.text

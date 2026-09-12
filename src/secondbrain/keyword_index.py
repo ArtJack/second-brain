@@ -68,7 +68,7 @@ def _require_fts5() -> None:
 
 
 # The shape a table must have to be usable. A table that does not match is from
-# an older version and is dropped rather than written to.
+# an older version and is migrated in place, rows and all, before use.
 _COLUMNS = ("source", "chunk", "name", "header", "document")
 
 
@@ -105,14 +105,9 @@ class KeywordIndex:
     def _ensure(self, conn: sqlite3.Connection, collection: str) -> str:
         table = _table(collection)
         if table not in self._known:
-            # `IF NOT EXISTS` keeps whatever is already on disk, so a table built
-            # by an older version stays at its old column count and every insert
-            # raises. The index is a derived cache with `rebuild_from_store` to
-            # repopulate it, so the honest move is to drop a table whose shape no
-            # longer matches and let the next ingest or reindex refill it —
-            # rather than fail at 03:15 on the deployed machine.
-            if self._columns(conn, table) not in (None, _COLUMNS):
-                conn.execute(f"DROP TABLE {table}")
+            # Brought up to the current columns with its rows, never dropped:
+            # `_migrate` records what dropping cost.
+            self._migrate(conn, table)
             conn.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS {table} USING fts5("
                 "source UNINDEXED, chunk UNINDEXED, name UNINDEXED, header, document, "
@@ -120,6 +115,37 @@ class KeywordIndex:
             )
             self._known.add(table)
         return table
+
+    def _migrate(self, conn: sqlite3.Connection, table: str) -> None:
+        """Bring a table built by an older version up to the current columns, keeping its rows.
+
+        The first version dropped any table whose columns did not match and said
+        "the next ingest or reindex" would refill it. Only a reindex refills a
+        whole collection; an ingest refills the files it touched. So the nightly
+        after a schema change would have replaced a 3,820-row index with the few
+        dozen rows of that night's changed files, and keyword search would have
+        silently covered a sliver of the corpus. Reads were no better: a query
+        naming the new column against an old table raised, retrieval swallowed the
+        error, and every answer went vector-only without a line in any log.
+
+        FTS5 cannot add a column, so the rows are copied into a table of the
+        current shape and the old one is dropped. A column the old table lacks is
+        filled with empty strings; a reindex fills it properly.
+        """
+        existing = self._columns(conn, table)
+        if existing is None or existing == _COLUMNS:
+            return
+        scratch = f"{table}__migrating"
+        conn.execute(f"DROP TABLE IF EXISTS {scratch}")
+        conn.execute(
+            f"CREATE VIRTUAL TABLE {scratch} USING fts5("
+            "source UNINDEXED, chunk UNINDEXED, name UNINDEXED, header, document, "
+            "tokenize='unicode61 remove_diacritics 2')"
+        )
+        carried = ", ".join(column if column in existing else "''" for column in _COLUMNS)
+        conn.execute(f"INSERT INTO {scratch} ({', '.join(_COLUMNS)}) SELECT {carried} FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {scratch} RENAME TO {table}")
 
     def _columns(self, conn: sqlite3.Connection, table: str) -> tuple[str, ...] | None:
         """The existing table's columns, or None if it does not exist."""
@@ -135,7 +161,13 @@ class KeywordIndex:
         row = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
         ).fetchone()
-        return table if row else None
+        if not row:
+            return None
+        # A read must never meet an old-shaped table: querying a column it
+        # lacks raises, and retrieval turns that into a silent vector-only
+        # answer. Migrating here costs one copy, once.
+        self._migrate(conn, table)
+        return table
 
     def upsert_chunks(self, collection: str, rows: list[dict], replace: bool = True) -> None:
         """Write these rows, by default replacing everything already held for their sources.

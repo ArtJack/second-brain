@@ -427,7 +427,7 @@ def test_an_index_built_on_an_older_schema_is_rebuilt_rather_than_failing(tmp_pa
     index = KeywordIndex(path)
     index.upsert_chunks("c", _rows(("/new.md", 0, "gateway routing")))
 
-    assert index.count("c") == 1, "the stale rows go with the old schema; a reindex repopulates"
+    assert index.count("c") == 2, "old rows are migrated with the table, not dropped with it"
     assert index.query("c", "gateway routing", limit=3)[0]["metadata"]["source"] == "/new.md"
 
 
@@ -453,3 +453,43 @@ def test_the_header_is_searchable_but_is_not_what_a_citation_quotes(tmp_path):
     assert hits[0]["document"] == "Stop the launchd job and wait for the port to close."
     assert "Gateway runbook" not in hits[0]["document"]
     assert hits[0]["metadata"]["header"] == "Gateway runbook › Restarting"
+
+
+def _old_schema_index(path, rows):
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE VIRTUAL TABLE kw_c USING fts5("
+            "source UNINDEXED, chunk UNINDEXED, name UNINDEXED, document, "
+            "tokenize='unicode61 remove_diacritics 2')"
+        )
+        conn.executemany("INSERT INTO kw_c VALUES (?, ?, ?, ?)", rows)
+
+
+def test_an_old_schema_index_keeps_every_row_when_one_file_is_ingested(tmp_path):
+    """The nightly after a schema change would have kept one night's files and lost the rest.
+
+    Measured on 2026-09-12 before this fix: a 300-row index built by the previous
+    schema became a 1-row index the moment new code ingested a single changed
+    file. On the live collection that was 3,820 rows about to become a few dozen.
+    """
+    path = tmp_path / "old.sqlite3"
+    _old_schema_index(path, [(f"/doc{i}.md", 0, f"doc{i}.md", f"gateway note {i}") for i in range(300)])
+
+    index = KeywordIndex(path)
+    index.upsert_chunks("c", _rows(("/changed.md", 0, "one changed file")))
+
+    assert index.count("c") == 301
+    assert index.query("c", "gateway note", limit=3), "the migrated rows are still searchable"
+
+
+def test_querying_an_old_schema_index_answers_instead_of_raising(tmp_path):
+    """A read used to raise `no such column: header`, which retrieval turned into vector-only."""
+    path = tmp_path / "old.sqlite3"
+    _old_schema_index(path, [("/a.md", 0, "a.md", "gateway routing")])
+
+    hits = KeywordIndex(path).query("c", "gateway routing", limit=3)
+
+    assert [hit["metadata"]["source"] for hit in hits] == ["/a.md"]
+    assert hits[0]["metadata"]["header"] == ""
