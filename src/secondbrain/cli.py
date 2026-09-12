@@ -83,6 +83,16 @@ def _print_answer(res: dict, show_distance: bool = True, show_sources: bool = Tr
     if invalid:
         refs = ", ".join(f"[{n}]" for n in invalid)
         console.print(f"  [yellow]⚠ ungrounded citation(s) {refs}: no matching source — answer may be unreliable[/]")
+    # The signal existed server-side for a week and reached no reader. An answer
+    # that states things as fact while citing none of the evidence it was handed
+    # is the one failure this product promises not to produce, so it is said out
+    # loud rather than left in a JSON field.
+    grounding = res.get("grounding") or {}
+    if grounding.get("unsupported"):
+        console.print(
+            f"  [red]⚠ unsupported: {grounding['sources_retrieved']} source(s) were retrieved "
+            "and the answer cites none of them[/]"
+        )
 
 
 def _ingest_path(path: str, reset: bool = False, collection: str | None = None) -> dict:

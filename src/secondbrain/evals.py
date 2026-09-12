@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .ask import ask
-from .citations import cited_numbers, invalid_citations
+from .citations import REFUSAL_MARKER, cited_numbers, invalid_citations
 from .config import cfg
 from .hybrid import hybrid_retrieve
 from .llm import embed
@@ -22,6 +22,10 @@ from .tracing import TraceRecorder, summarize_traces
 
 DEFAULT_BENCHMARK = Path(__file__).resolve().parents[2] / "evals" / "retrieval.json"
 DEFAULT_ABSTENTION_PHRASES = (
+    # The structured marker the answer prompt asks for. The phrases below it are
+    # the fallback for a model that ignores the instruction, which is why they
+    # stay: a heuristic is a poor primary signal and a reasonable backstop.
+    REFUSAL_MARKER.lower(),
     "cannot determine",
     "does not contain",
     "does not mention",
