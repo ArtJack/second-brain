@@ -661,6 +661,11 @@ def gc(
         f"kept      : {res['kept_sources']} source(s)",
         f"skipped   : {res['skipped_sources']} relative source(s)",
     ]
+    if not res["rules_loaded"]:
+        lines.append(
+            "excludable: unknown — the scan's exclusion rules could not be read, "
+            "so no drift is reported"
+        )
     if res["excluded_sources"]:
         verb = "excluded  " if res["excluded_enforced"] else "excludable"
         lines.append(
