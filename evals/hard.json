@@ -1,0 +1,153 @@
+{
+  "name": "second-brain hard retrieval",
+  "description": "A benchmark built to be failable. The regression set saturated at 1.0 on every metric before a change that dropped stopword filtering and before a backfill bug truncated the keyword index to the first chunks of every long file, and it moved for neither. Every case here targets one specific way retrieval goes wrong: an answer far from the top of a long document, a near-miss document that shares the query's vocabulary, a superseded document that still reads as authoritative, a query whose words appear nowhere in the answer, a rare identifier with no semantic neighbours, and non-ASCII text. Cases name the passage that answers them, not just the file, and name the documents they must not surface.",
+  "corpus": ["corpus-hard"],
+  "corpus_collection": "second_brain_hard",
+  "cases": [
+    {
+      "id": "late-chunk-budget-alert",
+      "query": "At what point does the gateway budget alert fire?",
+      "expected_sources": ["evals/corpus-hard/runbook-gateway.md"],
+      "expected_chunk_contains": ["80 percent of the monthly cap"],
+      "expected_answer_contains": ["80"],
+      "tags": ["late-chunk", "long-document"]
+    },
+    {
+      "id": "late-chunk-restart-procedure",
+      "query": "How should the gateway be restarted, and what must not be done?",
+      "expected_sources": ["evals/corpus-hard/runbook-gateway.md"],
+      "expected_chunk_contains": ["stale lock"],
+      "tags": ["late-chunk", "long-document"]
+    },
+    {
+      "id": "late-chunk-smoke-test",
+      "query": "What does the gateway smoke test have to cover before it counts as up?",
+      "expected_sources": ["evals/corpus-hard/runbook-gateway.md"],
+      "expected_chunk_contains": ["one embedding, one local chat completion"],
+      "tags": ["late-chunk", "long-document"]
+    },
+    {
+      "id": "distractor-offsite-schedule",
+      "query": "What time does the offsite backup run?",
+      "expected_sources": ["evals/corpus-hard/backup-offsite.md"],
+      "expected_chunk_contains": ["03:30 daily"],
+      "forbidden_sources": ["evals/corpus-hard/backup-local.md"],
+      "expected_answer_contains": ["03:30"],
+      "tags": ["distractor", "numeric"]
+    },
+    {
+      "id": "distractor-local-snapshots-are-not-a-backup",
+      "query": "Do the local Qdrant snapshots count as a backup?",
+      "expected_sources": ["evals/corpus-hard/backup-local.md"],
+      "expected_chunk_contains": ["same disk as the collection"],
+      "forbidden_sources": ["evals/corpus-hard/backup-offsite.md"],
+      "tags": ["distractor", "negation"]
+    },
+    {
+      "id": "superseded-qa-routing",
+      "query": "Which agent owns testing judgment for second-brain, and where is its state of record?",
+      "expected_sources": ["evals/corpus-hard/qa-verdict-current.md"],
+      "expected_chunk_contains": ["verdict"],
+      "forbidden_sources": ["evals/corpus-hard/qa-verdict-old.md"],
+      "tags": ["distractor", "superseded"]
+    },
+    {
+      "id": "superseded-qa-share-is-frozen",
+      "query": "Can QA reports still be written to the SMB share?",
+      "expected_sources": ["evals/corpus-hard/qa-verdict-current.md"],
+      "expected_chunk_contains": ["frozen read-only archive"],
+      "forbidden_sources": ["evals/corpus-hard/qa-verdict-old.md"],
+      "tags": ["distractor", "superseded", "negation"]
+    },
+    {
+      "id": "rare-identifier-key-generation",
+      "query": "GW-KEY-GEN-7",
+      "expected_sources": ["evals/corpus-hard/vault-rotation.md"],
+      "expected_chunk_contains": ["GW-KEY-GEN-7"],
+      "tags": ["keyword-only", "identifier"]
+    },
+    {
+      "id": "vocabulary-mismatch-hallucination",
+      "query": "How do we stop the assistant making things up when it was not shown the answer?",
+      "expected_sources": ["evals/corpus-hard/answer-contract.md"],
+      "expected_chunk_contains": ["NOT_IN_SOURCES:"],
+      "tags": ["vector-only", "vocabulary-mismatch"]
+    },
+    {
+      "id": "vocabulary-mismatch-provenance",
+      "query": "How can I tell apart something I told it myself from something a program told it?",
+      "expected_sources": ["evals/corpus-hard/memory-boundaries.md"],
+      "expected_chunk_contains": ["source: mcp"],
+      "tags": ["vector-only", "vocabulary-mismatch"]
+    },
+    {
+      "id": "numeric-fusion-constant",
+      "query": "What constant does the rank fusion use, and why not add the scores?",
+      "expected_sources": ["evals/corpus-hard/retrieval-design.md"],
+      "expected_chunk_contains": ["k=60"],
+      "expected_answer_contains": ["60"],
+      "tags": ["numeric"]
+    },
+    {
+      "id": "numeric-rotation-cadence",
+      "query": "How often do the Qdrant API key and the gateway keys rotate?",
+      "expected_sources": ["evals/corpus-hard/vault-rotation.md"],
+      "expected_chunk_contains": ["180 days"],
+      "expected_answer_contains": ["90", "180"],
+      "tags": ["numeric", "multi-fact"]
+    },
+    {
+      "id": "cyrillic-query",
+      "query": "где работает шлюз",
+      "expected_sources": ["evals/corpus-hard/notes-multilingual.md"],
+      "tags": ["non-ascii", "tokenizer"]
+    },
+    {
+      "id": "encoding-round-trip",
+      "query": "What is the canonical test sentence for encoding regressions?",
+      "expected_sources": ["evals/corpus-hard/notes-multilingual.md"],
+      "expected_chunk_contains": ["Über den Wolken muss die Freiheit wohl grenzenlos sein"],
+      "tags": ["non-ascii", "encoding"]
+    },
+    {
+      "id": "adjacency-is-not-evidence",
+      "query": "When is a neighbouring chunk allowed into the answer?",
+      "expected_sources": ["evals/corpus-hard/retrieval-design.md"],
+      "expected_chunk_contains": ["fill slots the"],
+      "tags": ["design"]
+    },
+    {
+      "id": "unsupported-is-not-refusal",
+      "query": "Is an answer that cites nothing the same as a refusal?",
+      "expected_sources": ["evals/corpus-hard/answer-contract.md"],
+      "expected_chunk_contains": ["unsupported"],
+      "tags": ["negation", "design"]
+    },
+    {
+      "id": "sandbox-memory-back-door",
+      "query": "Why does the nightly scan skip some memory subdirectories?",
+      "expected_sources": ["evals/corpus-hard/memory-boundaries.md"],
+      "expected_chunk_contains": ["back door"],
+      "tags": ["design"]
+    },
+    {
+      "id": "health-check-counts-models",
+      "query": "Why is pinging the port not enough to call a backend healthy?",
+      "expected_sources": ["evals/corpus-hard/runbook-gateway.md"],
+      "expected_chunk_contains": ["count models, not ping ports"],
+      "tags": ["late-chunk", "vocabulary-mismatch"]
+    },
+    {
+      "id": "abstain-gateway-cost",
+      "query": "What did the gateway cost to run last month in dollars?",
+      "expect_abstain": true,
+      "tags": ["abstention"]
+    },
+    {
+      "id": "abstain-owner-location",
+      "query": "Which city does the owner live in?",
+      "expect_abstain": true,
+      "tags": ["abstention"]
+    }
+  ]
+}

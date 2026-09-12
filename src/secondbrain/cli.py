@@ -299,8 +299,18 @@ def evaluate(
             f"hit-rate [bold]{_percent(summary['retrieval_hit_rate'])}[/]  "
             f"source recall [bold]{_percent(summary['mean_source_recall'])}[/]  "
             f"MRR [bold]{_decimal(summary['mrr'])}[/]  "
+            f"precision [bold]{_percent(summary['mean_precision'])}[/]  "
             f"duration [bold]{report['duration_ms']:.1f} ms[/]"
         )
+        # Printed only when the benchmark asks for them, so the older benchmarks
+        # keep the summary line they have always had.
+        if summary["mean_passage_recall"] is not None or summary["distractor_rate"] is not None:
+            parts = []
+            if summary["mean_passage_recall"] is not None:
+                parts.append(f"passage recall [bold]{_percent(summary['mean_passage_recall'])}[/]")
+            if summary["distractor_rate"] is not None:
+                parts.append(f"distractor rate [bold]{_percent(summary['distractor_rate'])}[/]")
+            console.print("  ".join(parts))
         if answers:
             console.print(
                 f"answer rubric [bold]{summary['answer_passed']}/{summary['cases']}[/] passed  "
@@ -317,10 +327,23 @@ def evaluate(
             console.print(f"trace export [bold]{report['trace_export']}[/]")
         for case in report["cases"]:
             if not case["retrieval"]["passed"]:
-                missing = set(case["retrieval"]["expected_sources"]) - set(
-                    case["retrieval"]["matched_expected_sources"]
+                retrieval = case["retrieval"]
+                missing = set(retrieval["expected_sources"]) - set(
+                    retrieval["matched_expected_sources"]
                 )
-                console.print(f"[red]FAIL[/] {case['id']}: missing source(s): {', '.join(sorted(missing))}")
+                # There are three ways to fail now, and printing only the first
+                # produced "missing source(s): " with nothing after it for every
+                # case that failed on one of the other two.
+                reasons = []
+                if missing:
+                    reasons.append(f"missing source(s): {', '.join(sorted(missing))}")
+                if retrieval["missing_passages"]:
+                    shown = "; ".join(f'"{phrase}"' for phrase in retrieval["missing_passages"])
+                    reasons.append(f"answering passage not retrieved: {shown}")
+                if retrieval["retrieved_forbidden"]:
+                    shown = ", ".join(retrieval["retrieved_forbidden"])
+                    reasons.append(f"surfaced a document this case names as wrong: {shown}")
+                console.print(f"[red]FAIL[/] {case['id']}: " + " | ".join(reasons))
             if answers and not case["answer"]["passed"]:
                 checks = case["answer"]["checks"]
                 failed = ", ".join(name for name, passed in checks.items() if not passed)
