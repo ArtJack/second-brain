@@ -5,8 +5,12 @@ __pycache__/
 *.egg-info/
 
 # Secrets / local config
-.env
-.env.gateway
+# The class, not the instances. `.env` and `.env.gateway` were listed by name,
+# so `.env.sops` — added later — was untracked but not ignored, one `git add -A`
+# away from being published in a public repo. It is sops-encrypted, which is the
+# only reason that was a near miss rather than an incident.
+.env*
+!.env.example
 web/.env*
 !web/.env.example
 web/node_modules/
