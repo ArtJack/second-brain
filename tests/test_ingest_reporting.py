@@ -196,3 +196,42 @@ def test_a_normal_run_does_not_report_the_excluded_trees(tmp_path, monkeypatch):
 
     assert [p.name for p in found] == ["note.md"]
     assert last_report()["skipped"] == []
+
+
+def test_an_even_length_latin1_note_is_not_read_as_utf16(tmp_path):
+    """Verdict SB-F-24, Critical: my own encoding ladder, one night old.
+
+    UTF-16 accepts almost any byte sequence of even length, so trying it before
+    the single-byte encodings turned roughly half of all Latin-1 notes into CJK
+    mojibake — which was then embedded and cited as the owner's own words. The
+    only reason the original test passed is that "Café Müller naïve" is 17 bytes,
+    an odd number, so it fell through to cp1252 by luck.
+
+    UTF-16 is only attempted when a byte-order mark says so.
+    """
+    note = tmp_path / "even.md"
+    even = "Café Müllerx"  # 12 bytes in latin-1
+    note.write_bytes(even.encode("latin-1"))
+    assert len(even.encode("latin-1")) % 2 == 0, "this test is about the even-length case"
+
+    assert read_file(note) == even
+
+
+def test_both_parities_round_trip(tmp_path):
+    """Parametrised over the property that caused the defect."""
+    for filler in ("", "x"):
+        text = f"Über den Wolken{filler}"
+        note = tmp_path / f"p{len(filler)}.md"
+        note.write_bytes(text.encode("latin-1"))
+        assert read_file(note) == text, f"failed at {len(text.encode('latin-1'))} bytes"
+
+
+def test_utf16_is_still_read_when_it_announces_itself(tmp_path):
+    for encoding in ("utf-16", "utf-16-le", "utf-16-be"):
+        note = tmp_path / f"{encoding}.md"
+        # utf-16 writes a BOM; the explicit LE/BE variants do not, so write one.
+        raw = "hello world".encode(encoding)
+        if encoding != "utf-16":
+            raw = (b"\xff\xfe" if encoding.endswith("le") else b"\xfe\xff") + raw
+        note.write_bytes(raw)
+        assert read_file(note).strip() == "hello world", encoding
