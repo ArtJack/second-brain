@@ -48,8 +48,8 @@ DEFAULT_CONFIG = {
         # makes them poison here. Asked where the gateway runs, the brain was
         # citing an invented runbook, and nothing in the answer distinguished it
         # from a note the owner actually wrote.
-        "corpus",
-        "corpus-hard",
+        "evals/corpus",
+        "evals/corpus-hard",
         ".pytest_cache",
         ".vercel",
         "dist",
@@ -226,8 +226,39 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def excluded_dir_rule(parts: tuple[str, ...], skip_dirs: set[str] | list[str]) -> str | None:
+    """The directory rule that excludes this path, or None.
+
+    A rule without a slash matches one path segment at any depth, which is what
+    you want for `.venv` or `node_modules`. A rule *with* a slash matches
+    consecutive segments, so `evals/corpus` names one directory rather than
+    every folder called corpus in the world.
+
+    That distinction is not cosmetic. This file already carried the lesson for a
+    different generic word — `data` was removed from the ingest skip list
+    because matching it per segment hid every folder of that name, including the
+    owner's own notes — and `corpus` was added as a bare name a few hours before
+    this, with `~/Projects/verdict/eval/corpus` sitting under a live scan target.
+    Combined with retroactive rule enforcement, a bare generic name does not just
+    hide a directory; it deletes what was already indexed from it.
+    """
+    segments = tuple(parts)
+    for rule in skip_dirs:
+        if "/" not in rule:
+            if rule in segments:
+                return rule
+            continue
+        wanted = tuple(part for part in rule.split("/") if part)
+        if not wanted:
+            continue
+        span = len(wanted)
+        if any(segments[i:i + span] == wanted for i in range(len(segments) - span + 1)):
+            return rule
+    return None
+
+
 def _is_under_skip_dir(path: Path, skip_dirs: set[str]) -> bool:
-    return bool(set(path.parts) & skip_dirs)
+    return excluded_dir_rule(path.parts, skip_dirs) is not None
 
 
 def discover_targets(config: dict[str, Any]) -> list[Path]:
@@ -316,8 +347,14 @@ def scan_targets(config: dict[str, Any]) -> ScanResult:
             # Pruning in place stops the walk descending into an excluded tree
             # at all, instead of stat-ing every file inside it and discarding
             # the results one by one.
-            dirnames[:] = [name for name in dirnames if name not in skip_dirs]
             here = Path(dirpath)
+            # Pruning has to ask the anchored question too, or `evals/corpus`
+            # would be walked into and only rejected file by file.
+            dirnames[:] = [
+                name
+                for name in dirnames
+                if excluded_dir_rule((*here.parts, name), skip_dirs) is None
+            ]
             if _is_under_skip_dir(here, skip_dirs):
                 continue
             for name in filenames:

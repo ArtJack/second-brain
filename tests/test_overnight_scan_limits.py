@@ -151,8 +151,103 @@ class TestBenchmarkFixturesAreNotMemories:
         assert "invented.md" not in names, "a fabricated document reached the real corpus"
 
     def test_the_default_config_carries_the_rule(self):
-        """A fresh install must not have to learn this the same way."""
+        """A fresh install must not have to learn this the same way.
+
+        Anchored, not bare: see TestExclusionRulesAreAnchored below for why the
+        first version of this rule was itself a defect.
+        """
         from secondbrain.overnight import DEFAULT_CONFIG
 
-        assert "corpus" in DEFAULT_CONFIG["exclude_dirs"]
-        assert "corpus-hard" in DEFAULT_CONFIG["exclude_dirs"]
+        assert "evals/corpus" in DEFAULT_CONFIG["exclude_dirs"]
+        assert "evals/corpus-hard" in DEFAULT_CONFIG["exclude_dirs"]
+
+
+class TestExclusionRulesAreAnchored:
+    """SB-F-44: a bare directory name matches at any depth, anywhere.
+
+    I added `corpus` and `corpus-hard` as bare names to keep the benchmark
+    fixtures out. This codebase already records that exact mistake, in a comment
+    about a different generic word: `"data" is deliberately NOT here: it used to
+    be, and since the match is per path segment it skipped every folder named
+    data anywhere in the world — including the owner's own notes.` I repeated it
+    a few hours later, with a word just as generic.
+
+    It is not hypothetical. `~/Projects/verdict/eval/corpus` is another
+    project's directory under a live scan target. Under the retroactive rule
+    enforcement added the same night, `sb gc --enforce-rules` would not merely
+    skip it in future — it would delete what is already indexed from it.
+
+    A rule containing a slash matches consecutive path segments, so the fixture
+    directories can be named exactly. Bare names keep working for the cases
+    where the name really is unambiguous, like `.venv`.
+    """
+
+    def _config(self, targets, dirs):
+        return {"targets": [str(t) for t in targets], "exclude_dirs": dirs, "exclude_globs": []}
+
+    def test_an_anchored_rule_excludes_only_the_directory_it_names(self, tmp_path):
+        from secondbrain import overnight
+
+        fixture = tmp_path / "evals" / "corpus" / "invented.md"
+        elsewhere = tmp_path / "linguistics" / "corpus" / "fieldnotes.md"
+        for path in (fixture, elsewhere):
+            path.parent.mkdir(parents=True)
+            path.write_text("text")
+
+        result = overnight.scan_targets(self._config([tmp_path], ["evals/corpus"]))
+
+        names = [str(p) for p in result.files]
+        assert any("fieldnotes.md" in n for n in names), "an unrelated corpus directory must survive"
+        assert not any("invented.md" in n for n in names)
+
+    def test_a_bare_name_still_matches_at_any_depth(self, tmp_path):
+        """Unchanged for the names where that is what you want."""
+        from secondbrain import overnight
+
+        buried = tmp_path / "a" / "node_modules" / "left-pad" / "readme.md"
+        buried.parent.mkdir(parents=True)
+        buried.write_text("x")
+        (tmp_path / "keep.md").write_text("x")
+
+        result = overnight.scan_targets(self._config([tmp_path], ["node_modules"]))
+
+        assert [p.name for p in result.files] == ["keep.md"]
+
+    def test_the_shipped_rules_name_the_fixture_directories_by_path(self):
+        from secondbrain.overnight import DEFAULT_CONFIG
+
+        assert "evals/corpus" in DEFAULT_CONFIG["exclude_dirs"]
+        assert "evals/corpus-hard" in DEFAULT_CONFIG["exclude_dirs"]
+        assert "corpus" not in DEFAULT_CONFIG["exclude_dirs"], "too generic to match at any depth"
+        assert "corpus-hard" not in DEFAULT_CONFIG["exclude_dirs"]
+
+
+class TestDirectIngestHonoursTheFixtureExclusion:
+    """SB-F-43: the exclusion lived only in the nightly scan.
+
+    `sb ingest ~/Projects/second-brain` walks with `ingest.discover()`, which has
+    its own independent skip list and never sees the scan's rules. That is the
+    command the owner would use to re-ingest the project, and it reopened
+    exactly the defect the exclusion was written to close.
+    """
+
+    def test_discover_skips_the_benchmark_fixtures(self, tmp_path):
+        from secondbrain.ingest import discover
+
+        for rel in ("evals/corpus/old.md", "evals/corpus-hard/invented.md", "docs/real.md"):
+            path = tmp_path / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("text")
+
+        found = [p.name for p in discover(tmp_path)]
+
+        assert found == ["real.md"]
+
+    def test_an_unrelated_corpus_directory_is_still_ingested(self, tmp_path):
+        from secondbrain.ingest import discover
+
+        path = tmp_path / "linguistics" / "corpus" / "fieldnotes.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("real research")
+
+        assert [p.name for p in discover(tmp_path)] == ["fieldnotes.md"]

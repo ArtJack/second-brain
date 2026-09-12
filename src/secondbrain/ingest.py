@@ -34,6 +34,15 @@ SUPPORTED = {
 # directory is excluded by path instead, below.
 SKIP_DIRS = {".venv", "node_modules", ".git", "__pycache__", ".next"}
 
+# Directories this walk must refuse even when a caller points `sb ingest`
+# straight at them. The benchmark corpora are fabricated documents written in
+# the owner's voice, and keeping them out only during the nightly scan was half
+# a fix: `sb ingest ~/Projects/second-brain` is the command someone would
+# actually run to rebuild the project, and it walked straight past the rule.
+# Anchored by path, because a bare `corpus` matches every folder of that name
+# anywhere — the mistake recorded for `data` above.
+SKIP_PATHS = ("evals/corpus", "evals/corpus-hard")
+
 # Encodings tried in order before a file is declared undecodable. `errors="ignore"`
 # is not on this list and must not come back: it does not fall back, it deletes the
 # bytes it cannot read and hands on the wreckage, which then gets embedded and
@@ -216,14 +225,31 @@ def normalised(text: str) -> str:
     return " ".join(str(text).split())
 
 
-def chunk_id(text: str) -> str:
-    """Identity derived from content, not from where the content was found.
+def chunk_id(text: str, source: str) -> str:
+    """Identity is normalised content, scoped to the source that claims it.
 
-    The path was doing this job, which made a copied file a second corpus and
-    made every web ingest a fresh document under a temporary directory that no
-    longer existed by the time anyone read the citation.
+    Content rather than a path *and an ordinal*, because the ordinal was the
+    problem: every web ingest wrote its body to a fresh temporary directory, so
+    the same document posted twice was two documents under two paths that no
+    longer existed by the time anyone read the citation. A logical source plus
+    its content is stable across both of those.
+
+    Scoped to the source, because the first version was not, and that made
+    identity and deletion key on different things. Two byte-identical files
+    collapsed onto one point; the second to be ingested overwrote its `path`, so
+    the first file's claim was gone; deleting the second then removed the shared
+    point and the first file — still on disk, never changed, so never
+    re-ingested — silently lost its content from the store while the keyword
+    index kept a row for it. (Verdict SB-F-42, proven on two projects'
+    byte-identical `CLAUDE.md`.)
+
+    Cross-path de-duplication is therefore given up on purpose. Doing it safely
+    needs a point to record every path that claims it, so a delete removes a
+    claim and only drops the point when the last one goes. That is a different
+    change with its own migration, not a line here.
     """
-    digest = hashlib.sha256(normalised(text).encode("utf-8")).hexdigest()
+    material = f"{normalised(source)}\x00{normalised(text)}"
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     return f"{_ID_PREFIX}{digest[:_ID_LENGTH]}"
 
 
@@ -278,7 +304,7 @@ def ingest_text(
 def _write_chunks(store, index_name: str, chunks, *, path: str, doc_type: str, mtime: float) -> None:
     """The one place a chunk becomes a point, so both stores always agree."""
     store.upsert(
-        ids=[chunk_id(chunk.body) for chunk in chunks],
+        ids=[chunk_id(chunk.body, path) for chunk in chunks],
         # Embedded with the header, stored without it.
         embeddings=embed([chunk.embedded for chunk in chunks]),
         documents=[chunk.body for chunk in chunks],
@@ -353,6 +379,11 @@ def read_file(path: Path) -> str:
 def _is_skipped_dir(path: Path, own_data: Path) -> str | None:
     if SKIP_DIRS & set(path.parts):
         return "skipped-dir"
+    # Imported here rather than at module scope: overnight imports this module.
+    from .overnight import excluded_dir_rule
+
+    if excluded_dir_rule(path.parts[:-1], SKIP_PATHS):
+        return "benchmark-fixture"
     try:
         if own_data in path.resolve().parents:
             return "own-data-dir"

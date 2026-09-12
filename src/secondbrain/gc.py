@@ -110,11 +110,10 @@ def _excluding_rule(path: Path, rules: dict) -> str | None:
     for rule in _rule_list(rules, "exclude_globs"):
         if fnmatch.fnmatch(name, rule.lower()):
             return rule
-    excluded_dirs = set(_rule_list(rules, "exclude_dirs"))
-    for part in path.parts[:-1]:
-        if part in excluded_dirs:
-            return f"dir:{part}"
-    return None
+    from .overnight import excluded_dir_rule
+
+    rule = excluded_dir_rule(path.parts[:-1], _rule_list(rules, "exclude_dirs"))
+    return f"dir:{rule}" if rule else None
 
 
 def _is_mounted(path: Path) -> bool:
