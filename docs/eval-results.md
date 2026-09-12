@@ -1,5 +1,67 @@
 # second-brain eval results
 
+## 2026-09-12 — what the 100% distractor rate actually costs: tokens, not correctness
+
+This corrects the entry below it. When the hard benchmark first reported that all
+four distractor cases retrieve the document they name as wrong, I wrote that "the
+answer is then built from both". That was an inference, not a measurement, and it
+was wrong.
+
+Measured, k=5, `SB_HYBRID=1`, Qdrant, twenty documents, with answers generated:
+
+**Answer rubric 4 of 4 passed, score 100%.** The model gives the correct answer
+in every distractor case, including the two where the wrong document is ranked
+*first*. Asked "what time does the offsite backup run", retrieval puts the local
+snapshot policy at rank 1 and the offsite policy at rank 2, and the answer reads
+"The offsite backup runs at **03:30 daily** [2]" — it skipped source 1 and cited
+source 2. Asked which agent owns QA, it cites only the current routing document
+and never the one marked SUPERSEDED.
+
+So the distractor rate measures **context waste, not wrong answers.** The answer
+layer is already doing the disambiguation that ranking is not.
+
+### The ranked lists, which say why no threshold fixes this
+
+| case | rank 1 | rank 2 | slots 3–5 |
+|---|---|---|---|
+| offsite schedule | **wrong** 0.098 | right 0.123 | 0.281 – 0.508 |
+| local snapshots | right 0.083 | **wrong** 0.119 | 0.252 – 0.459 |
+| qa routing | right 0.060 | **wrong** 0.130 | 0.284 – 0.447 |
+| qa share frozen | **wrong** 0.119 | right 0.229 | 0.349 – 0.504 |
+
+Two things fall out of that table.
+
+**A relevance floor cannot fix the distractor problem.** In the offsite case the
+wrong document is *closer* than the right one, 0.098 against 0.123. Any threshold
+that drops one drops the other. This is not a tuning failure: `backup-offsite.md`
+and `backup-local.md` are both current, both correct, and each is the right answer
+to the other's question. No ranking signal distinguishes them, because none exists
+in the documents.
+
+**A relevance floor would fix something else entirely.** Slots 3 to 5 sit at 0.25
+to 0.51 while every real match is under 0.23, a clean and consistent gap. Three of
+five slots in every one of these cases go to documents that are simply not about
+the question — `vault-rotation.md` and `health-checks.md` returned for a question
+about backup timing. That is the 28.9% precision, and it is the thing worth fixing.
+
+**No adjacency padding appeared in any slot.** Every one was a real match from one
+retriever or the other, so the SB-F-27 fix is holding under measurement.
+
+### What this changes
+
+A supersession demotion rule would address two of the four cases, and those two
+were already answered correctly. It is not worth building. The general fix — a
+relevance floor, so `k` is a budget rather than a quota — addresses the precision
+number instead, which is the real cost: three wasted slots per query in context
+the model pays for and then ignores.
+
+That change is **not** made here. It is a ranking change, it is gated on a parked
+owner question about whether the current k=5 answer mix is intended, and the
+measurement above is what that decision needs rather than a substitute for it.
+
+The honest summary: the system is behaving better than the benchmark's headline
+number suggested, and the benchmark was right to make the number visible anyway.
+
 ## 2026-09-12 — contextual chunk headers
 
 Each chunk is now embedded and keyword-indexed with a header line naming its
