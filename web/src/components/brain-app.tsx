@@ -688,7 +688,13 @@ export function BrainApp({ ownerLoginEnabled = false }: { ownerLoginEnabled?: bo
       <footer className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] bg-white px-4 py-3 text-sm text-slate-600 md:px-6">
         <div className="flex flex-wrap items-center gap-5">
           <StatusPill health={health} />
-          <span className="hidden sm:inline">All systems {health === "online" ? "nominal" : "using fallback answers"}</span>
+          <span className="hidden sm:inline">
+            {health === "checking"
+              ? "Checking the lab"
+              : health === "online"
+                ? "All systems nominal"
+                : "All systems using fallback answers"}
+          </span>
           <span className="inline-flex items-center gap-2">
             <Activity className="size-4 text-slate-500" />
             Model: {status?.chat_model ?? modelLabel}
@@ -709,11 +715,19 @@ export function BrainApp({ ownerLoginEnabled = false }: { ownerLoginEnabled?: bo
             className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium ${
               health === "online"
                 ? "border-emerald-200 bg-emerald-50 text-[var(--accent)]"
-                : "border-amber-300 bg-[var(--amber-soft)] text-[var(--amber)]"
+                : health === "offline"
+                  ? "border-amber-300 bg-[var(--amber-soft)] text-[var(--amber)]"
+                  : "border-slate-200 bg-slate-100 text-slate-500"
             }`}
           >
-            {health === "online" ? <CheckCircle2 className="size-4" /> : <Moon className="size-4" />}
-            {health === "online" ? "Lab online" : "The lab is asleep"}
+            {health === "online" ? (
+              <CheckCircle2 className="size-4" />
+            ) : health === "offline" ? (
+              <Moon className="size-4" />
+            ) : (
+              <Activity className="size-4" />
+            )}
+            {health === "online" ? "Lab online" : health === "offline" ? "The lab is asleep" : "Checking the lab"}
           </button>
         </div>
       </footer>
