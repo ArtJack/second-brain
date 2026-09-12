@@ -352,3 +352,53 @@ def test_an_index_error_degrades_to_vector_search_rather_than_failing_the_answer
 
     hits = hybrid.hybrid_retrieve(Store(), "gateway", [0.1], 5)
     assert [h["metadata"]["source"] for h in hits] == ["/v.md"], "the answer must survive a broken index"
+
+
+def test_rebuilding_keeps_every_chunk_of_a_file_that_spans_a_batch(tmp_path):
+    """A large file lost all but its last batch of chunks during backfill.
+
+    `upsert_chunks` replaces a source wholesale — correct for ingest, which hands
+    over one file's chunks in a single call. The backfill flushes every N rows
+    regardless of which file they came from, so a file bigger than one batch had
+    its already-written rows deleted by its own next batch. Measured on the live
+    corpus: 79 of 346 files were truncated and the index held 2,695 of 3,934
+    chunks, with the largest file down to 10 chunks from 331. Nothing failed —
+    keyword search just stopped being able to see two thirds of a long document.
+    """
+    from secondbrain.keyword_index import rebuild_from_store
+
+    class BigFileStore:
+        collection_name = "big"
+
+        def documents(self):
+            for chunk in range(25):
+                yield {
+                    "document": f"gateway routing section {chunk}",
+                    "metadata": {"source": "/big.md", "chunk": chunk, "name": "big.md"},
+                }
+
+    index = KeywordIndex(tmp_path / "spanning.sqlite3")
+    written = rebuild_from_store(BigFileStore(), index=index, batch_size=10)
+
+    assert written == 25
+    assert index.count("big") == 25, "a file must not delete its own earlier batches"
+
+
+def test_rebuilding_still_replaces_a_source_left_over_from_a_previous_index(tmp_path):
+    """The fix must not turn the backfill into an append."""
+    from secondbrain.keyword_index import rebuild_from_store
+
+    class Store:
+        collection_name = "c"
+
+        def documents(self):
+            return [{"document": "gateway", "metadata": {"source": "/a.md", "chunk": 0, "name": "a.md"}}]
+
+    index = KeywordIndex(tmp_path / "stale.sqlite3")
+    index.upsert_chunks("c", [{"source": "/a.md", "chunk": 0, "name": "a.md", "document": "old text"}])
+    index.upsert_chunks("c", [{"source": "/gone.md", "chunk": 0, "name": "gone.md", "document": "deleted file"}])
+
+    rebuild_from_store(Store(), index=index)
+
+    assert index.count("c") == 1
+    assert index.query("c", "deleted file", limit=3) == []

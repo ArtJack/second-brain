@@ -115,8 +115,16 @@ class KeywordIndex:
         ).fetchone()
         return table if row else None
 
-    def upsert_chunks(self, collection: str, rows: list[dict]) -> None:
-        """Replace each (source, chunk) with the row given."""
+    def upsert_chunks(self, collection: str, rows: list[dict], replace: bool = True) -> None:
+        """Write these rows, by default replacing everything already held for their sources.
+
+        `replace` is the contract, and it is a per-source wholesale replace, not
+        a per-chunk one: a caller hands over *all* of a file's chunks in one
+        call, and what was there before is gone. Ingest works that way. A caller
+        that must split one source across several calls has to pass
+        `replace=False` and clear the ground itself, or each call will delete
+        what the previous one just wrote.
+        """
         if not rows:
             return
         with self._connect() as conn:
@@ -126,8 +134,9 @@ class KeywordIndex:
             # scans the whole table: deleting per chunk made an ingest quadratic
             # in corpus size, and the transaction that held the write lock grew
             # with it. Re-ingesting a file replaces all of its rows anyway.
-            for source in dict.fromkeys(row["source"] for row in rows):
-                conn.execute(f"DELETE FROM {table} WHERE source = ?", (source,))
+            if replace:
+                for source in dict.fromkeys(row["source"] for row in rows):
+                    conn.execute(f"DELETE FROM {table} WHERE source = ?", (source,))
             conn.executemany(
                 f"INSERT INTO {table} (source, chunk, name, document) VALUES (?, ?, ?, ?)",
                 [
@@ -203,6 +212,9 @@ def rebuild_from_store(store, index: KeywordIndex | None = None, batch_size: int
     collection = getattr(store, "collection_name", None)
     if not collection:
         raise ValueError("store does not expose a collection name")
+    # Dropping the table first is what makes the `replace=False` below safe *and*
+    # necessary: there is nothing left to replace, and a file whose chunks span
+    # more than one batch would otherwise have each batch delete the last.
     index.reset(collection)
     rows: list[dict] = []
     written = 0
@@ -220,10 +232,10 @@ def rebuild_from_store(store, index: KeywordIndex | None = None, batch_size: int
             }
         )
         if len(rows) >= batch_size:
-            index.upsert_chunks(collection, rows)
+            index.upsert_chunks(collection, rows, replace=False)
             written += len(rows)
             rows = []
     if rows:
-        index.upsert_chunks(collection, rows)
+        index.upsert_chunks(collection, rows, replace=False)
         written += len(rows)
     return written
