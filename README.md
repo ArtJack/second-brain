@@ -186,6 +186,35 @@ uv run sb overnight
 The first run creates `data/overnight/config.json`. Edit `targets` there to point at your
 real inboxes or synced network folders. Reports land in `data/overnight/reports/`.
 
+### Routing a target to a collection
+
+A target is normally a string, and everything found under it is ingested into the default
+collection:
+
+```json
+"targets": ["~/Projects/second-brain", "~/Projects/engineering-docs"]
+```
+
+A target may instead be an object naming the collection it belongs to:
+
+```json
+"targets": [
+  "~/Projects/second-brain",
+  { "path": "/Volumes/DISK/AI/artjeck/reference", "collection": "second_brain_reference" }
+]
+```
+
+Both forms can appear in the same list, so an existing config needs no changes. The report
+names the collection for a file only when it is not the default.
+
+This exists because the reference corpus — syllabi, standards, study material you keep but did
+not write — was split out of the personal collection so a question about your own work could
+not be answered out of someone else's textbook. The scan did not know about the split and
+ingested everything into the default collection, so the migration had to be protected by
+excluding `istqb` outright. That bought safety at the cost of the reference corpus having no
+automatic refresh at all. Naming the collection on the target is the version of that which
+keeps working.
+
 To schedule it daily (macOS, launchd):
 
 ```bash
