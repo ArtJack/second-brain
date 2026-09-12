@@ -42,6 +42,14 @@ DEFAULT_CONFIG = {
         # back two or three times and spends the answer's whole context budget.
         ".claude",
         ".codex",
+        # The evaluation corpora are fiction, written to be *found* by a
+        # benchmark. They are shaped exactly like the owner's real notes,
+        # because that is what makes them useful fixtures — and it is also what
+        # makes them poison here. Asked where the gateway runs, the brain was
+        # citing an invented runbook, and nothing in the answer distinguished it
+        # from a note the owner actually wrote.
+        "corpus",
+        "corpus-hard",
         ".pytest_cache",
         ".vercel",
         "dist",

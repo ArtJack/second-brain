@@ -116,3 +116,43 @@ def test_a_skipped_file_is_counted_in_the_run_stats(tmp_path):
     report = next((root / "reports").glob("*.md")).read_text()
     assert "api-tokens.json" in report
     assert "sk-not-real" not in report
+
+
+class TestBenchmarkFixturesAreNotMemories:
+    """Invented documents must never enter the corpus the owner asks questions of.
+
+    The evaluation corpora are fiction. `evals/corpus-hard/runbook-gateway.md`
+    says "the gateway's budget alert fires at 80 percent of the monthly cap" and
+    `backup-offsite.md` says restic runs at 03:30 — numbers written to be *found*
+    by a benchmark, not because anyone measured them. They are shaped exactly
+    like the owner's real notes, because that is what makes them useful fixtures.
+
+    They were being ingested into the real collection. Asked "where does the
+    gateway run", the brain cited `evals/corpus-hard/runbook-gateway.md` as a
+    source, and a reader has no way to tell that document from a note the owner
+    wrote. For a system whose whole promise is "no source, no claim", a
+    fabricated source is the worst possible thing to hold.
+    """
+
+    def test_a_benchmark_corpus_directory_is_not_scanned(self, tmp_path):
+        from secondbrain import overnight
+
+        real = tmp_path / "notes.md"
+        real.write_text("a real note")
+        for name in ("corpus", "corpus-hard"):
+            fixture = tmp_path / "evals" / name / "invented.md"
+            fixture.parent.mkdir(parents=True)
+            fixture.write_text("# Gateway runbook\n\nThe budget alert fires at 80 percent.")
+
+        result = overnight.scan_targets({"targets": [str(tmp_path)]})
+
+        names = [p.name for p in result.files]
+        assert "notes.md" in names
+        assert "invented.md" not in names, "a fabricated document reached the real corpus"
+
+    def test_the_default_config_carries_the_rule(self):
+        """A fresh install must not have to learn this the same way."""
+        from secondbrain.overnight import DEFAULT_CONFIG
+
+        assert "corpus" in DEFAULT_CONFIG["exclude_dirs"]
+        assert "corpus-hard" in DEFAULT_CONFIG["exclude_dirs"]
