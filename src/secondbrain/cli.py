@@ -15,6 +15,7 @@ from .ask import ask as ask_fn
 from .ask import recall as recall_fn
 from .browser_check import DEFAULT_BROWSER_DIR, capture_url
 from .config import cfg
+from .config import collections_for
 from .evals import DEFAULT_BENCHMARK, load_benchmark, resolve_corpus_paths, run_benchmark, select_cases
 from .gc import GarbageCollectionRefused, collect_garbage
 from .ingest import ingest_paths
@@ -35,6 +36,18 @@ console = Console()
 
 AGENT_NAME = "Artjeck"
 _COLLECTION: str | None = None
+
+
+def _corpus_target(corpus: str) -> str | list[str] | None:
+    """What to search: an explicit --collection always wins over a named corpus.
+
+    `--collection` addresses one collection by name and predates this; `--corpus`
+    names a role. Honouring the explicit name first keeps every existing script
+    and the seeding flow behaving exactly as before.
+    """
+    if _COLLECTION is not None:
+        return _COLLECTION
+    return collections_for(corpus)
 
 
 @app.callback()
@@ -108,10 +121,11 @@ def ingest(
 def ask(
     question: str = typer.Argument(..., help="Your question"),
     k: int = typer.Option(cfg.top_k, "--k", help="Chunks to retrieve"),
+    corpus: str = typer.Option("personal", "--corpus", help="personal (default), reference, or all"),
 ):
     """Ask a question and get an answer cited to your sources."""
     try:
-        res = ask_fn(question, k=k, collection=_COLLECTION)
+        res = ask_fn(question, k=k, collection=_corpus_target(corpus))
     except RuntimeError as exc:
         console.print(f"[red]ask failed:[/] {exc}")
         raise typer.Exit(1) from exc
@@ -143,10 +157,11 @@ def see(
 def recall(
     query: str = typer.Argument(..., help="Search query"),
     top_k: int = typer.Option(0, "--top-k", "--k", help="Chunks to retrieve (0 = configured default)"),
+    corpus: str = typer.Option("personal", "--corpus", help="personal (default), reference, or all"),
 ):
     """Retrieve raw matching chunks without calling the chat model."""
     try:
-        res = recall_fn(query, top_k=top_k, collection=_COLLECTION)
+        res = recall_fn(query, top_k=top_k, collection=_corpus_target(corpus))
     except RuntimeError as exc:
         console.print(f"[red]recall failed:[/] {exc}")
         raise typer.Exit(1) from exc

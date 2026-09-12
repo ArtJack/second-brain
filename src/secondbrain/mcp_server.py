@@ -35,7 +35,7 @@ from mcp.types import ToolAnnotations
 
 from .ask import ask as ask_fn
 from .ask import recall as recall_fn
-from .config import cfg
+from .config import cfg, collections_for
 from .ingest import ingest_paths
 from .memory import learn as learn_memory
 from .store import Store
@@ -81,7 +81,7 @@ _WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHi
 
 
 @mcp.tool(annotations=_READONLY)
-def ask(question: str, top_k: int = 0) -> dict:
+def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
     """Answer a question from the user's second brain, cited to their own sources.
 
     Retrieves the most relevant stored chunks and has the local model answer using
@@ -90,8 +90,16 @@ def ask(question: str, top_k: int = 0) -> dict:
     Args:
         question: The natural-language question to answer.
         top_k: How many chunks to retrieve (0 = use the configured default).
+        corpus: Which body of knowledge to search. "personal" (default) is the
+            user's own notes, docs and code. "reference" is study and standards
+            material they keep but did not write — ask there only when the
+            question is about that material. "all" searches both.
     """
-    result = ask_fn(question, k=top_k if top_k and top_k > 0 else None)
+    result = ask_fn(
+        question,
+        k=top_k if top_k and top_k > 0 else None,
+        collection=collections_for(corpus),
+    )
     return {
         "answer": result["answer"],
         "citations": [

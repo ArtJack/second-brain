@@ -149,7 +149,7 @@ class TestProductionWiringCarriesTheSignal:
 
         monkeypatch.setattr(
             m, "ask_fn",
-            lambda q, k=None: {
+            lambda q, k=None, collection=None: {
                 "answer": "Stated as fact, cited nowhere.",
                 "sources": [{"n": 1, "source": "lab.md", "distance": 0.1}],
                 "invalid_citations": [],
@@ -169,7 +169,7 @@ class TestProductionWiringCarriesTheSignal:
 
         monkeypatch.setattr(
             m, "ask_fn",
-            lambda q, k=None: {"answer": "A", "sources": [], "invalid_citations": []},
+            lambda q, k=None, collection=None: {"answer": "A", "sources": [], "invalid_citations": []},
         )
 
         with pytest.raises(KeyError):

@@ -25,17 +25,25 @@ def _span(
     )
 
 
+def _names(collection: str | list[str] | None) -> list[str | None]:
+    """One corpus or several, as a list. A bare name keeps the old single-store path."""
+    if isinstance(collection, list):
+        return list(collection)
+    return [collection]
+
+
 def ask(
     question: str,
     k: int | None = None,
     *,
-    collection: str | None = None,
+    collection: str | list[str] | None = None,
     trace: TraceRecorder | None = None,
     parent_span_id: str | None = None,
 ) -> dict:
-    store = Store(collection=collection)
+    names = _names(collection)
+    stores = [Store(collection=name) for name in names]
     with _span(trace, "store_count", kind="store", parent_span_id=parent_span_id) as count_span:
-        chunks = store.count()
+        chunks = sum(store.count() for store in stores)
         if count_span:
             count_span.add_attributes({"chunks": chunks})
             count_span.set_summary({"chunks": chunks})
@@ -54,7 +62,16 @@ def ask(
             embed_span.set_summary({"vector_dimensions": len(qvec)})
     with _span(trace, "retrieve_context", kind="retrieval", parent_span_id=parent_span_id) as retrieve_span:
         limit = k or cfg.top_k
-        hits = hybrid_retrieve(store, question, qvec, limit, enabled=cfg.hybrid_enabled)
+        hits = []
+        for store in stores:
+            hits.extend(hybrid_retrieve(store, question, qvec, limit, enabled=cfg.hybrid_enabled))
+        if len(stores) > 1:
+            # Across corpora, nearer wins. This is a plain distance sort, not a
+            # principled fusion: keyword hits carry 1/(1+score) rather than a
+            # cosine distance, so the two scales are only roughly comparable.
+            # Reciprocal-rank fusion is the fix, and it lands with the keyword index.
+            hits.sort(key=lambda hit: hit["distance"])
+            hits = hits[:limit]
         if retrieve_span:
             retrieve_span.add_attributes({"hit_count": len(hits), "top_k": k or cfg.top_k})
             retrieve_span.set_summary({"hit_count": len(hits)})
@@ -87,14 +104,20 @@ def ask(
     }
 
 
-def recall(query: str, top_k: int = 0, collection: str | None = None) -> dict:
+def recall(query: str, top_k: int = 0, collection: str | list[str] | None = None) -> dict:
     """Retrieve raw matching chunks without calling the chat model."""
-    store = Store(collection=collection)
-    if store.count() == 0:
+    stores = [Store(collection=name) for name in _names(collection)]
+    populated = [store for store in stores if store.count() > 0]
+    if not populated:
         return {"count": 0, "hits": []}
     k = top_k if top_k and top_k > 0 else cfg.top_k
     qvec = embed([query])[0]
-    hits = store.query(qvec, k)
+    hits = []
+    for store in populated:
+        hits.extend(store.query(qvec, k))
+    if len(populated) > 1:
+        hits.sort(key=lambda hit: hit["distance"])
+        hits = hits[:k]
     return {
         "count": len(hits),
         "hits": [
