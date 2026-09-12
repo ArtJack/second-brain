@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .ask import ask as ask_fn
 from .ask import recall as recall_fn
-from .citations import invalid_citations
+from .citations import grounding, invalid_citations
 from .config import cfg
 from .hybrid import hybrid_retrieve
 from .ingest import ingest_paths
@@ -352,14 +352,24 @@ def ask_stream(req: AskRequest, auth: AuthContext = Depends(auth_context)) -> St
         if evidence["empty"]:
             answer_text = "Nothing ingested yet - run `sb ingest <path>` first."
             yield _sse(answer_text, event="token")
-            yield _sse({"invalid_citations": []}, event="done")
+            yield _sse(
+                {"invalid_citations": [], "grounding": grounding("", 0)},
+                event="done",
+            )
             return
         parts: list[str] = []
         for delta in answer_stream(req.question, evidence["context"]):
             parts.append(delta)
             yield _sse(delta, event="token")
+        answer_text = "".join(parts)
+        # The streaming path is what the web UI reaches for interactive answers,
+        # so it needs the same grounding signal as POST /ask. `invalid_citations`
+        # alone is structurally blind to an answer that cites nothing at all.
         yield _sse(
-            {"invalid_citations": invalid_citations("".join(parts), len(sources))},
+            {
+                "invalid_citations": invalid_citations(answer_text, len(sources)),
+                "grounding": grounding(answer_text, len(sources)),
+            },
             event="done",
         )
 

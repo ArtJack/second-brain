@@ -7,6 +7,8 @@ own tests and by the MCP Inspector.
 """
 from __future__ import annotations
 
+from secondbrain.citations import grounding
+
 
 def test_ask_shapes_citations(monkeypatch):
     from secondbrain import mcp_server as m
@@ -18,6 +20,10 @@ def test_ask_shapes_citations(monkeypatch):
             "answer": "A",
             "sources": [{"n": 1, "source": "/x.md", "distance": 0.1234}],
             "invalid_citations": [],
+            # ask() always returns this; a fake that omits it is a fake that
+            # lies about the contract, and mcp_server.ask indexes it rather than
+            # failing open so the omission surfaces here rather than downstream.
+            "grounding": grounding("A", 1),
         }
 
     monkeypatch.setattr(m, "ask_fn", fake_ask)
@@ -31,7 +37,12 @@ def test_ask_passes_top_k(monkeypatch):
     from secondbrain import mcp_server as m
 
     seen = {}
-    monkeypatch.setattr(m, "ask_fn", lambda q, k=None: seen.update(k=k) or {"answer": "", "sources": []})
+    monkeypatch.setattr(
+        m,
+        "ask_fn",
+        lambda q, k=None: seen.update(k=k)
+        or {"answer": "", "sources": [], "grounding": grounding("", 0)},
+    )
     m.ask("q", top_k=7)
     assert seen["k"] == 7
 
@@ -123,7 +134,19 @@ def test_recall_passes_top_k(monkeypatch):
     assert seen == {"query": "anything", "top_k": 6}
 
 
-def test_expected_tools_are_registered():
+def test_tool_functions_are_importable():
+    """The module-level callables exist — which is all this can actually check.
+
+    `@mcp.tool` returns the undecorated function, so these attributes stay
+    callable whether or not registration with the FastMCP instance succeeded.
+    This test was previously named `test_expected_tools_are_registered` and
+    promised more than it verified: it would have stayed green through a
+    registration regression. Registration and the safety annotations are
+    asserted against the server's own registry in `tests/test_mcp_registry.py`.
+
+    The property kept here is still worth holding: the rest of this file
+    monkeypatches these attributes, so they have to be importable by name.
+    """
     from secondbrain import mcp_server as m
 
     for name in ("ask", "recall", "ingest", "learn", "list_tasks", "add_task", "complete_task", "status"):

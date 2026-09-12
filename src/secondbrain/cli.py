@@ -566,10 +566,15 @@ def browser_check(
 @app.command()
 def health(
     timeout: int = typer.Option(45, "--timeout", help="Per-check timeout in seconds"),
+    projects: bool = typer.Option(
+        False,
+        "--projects",
+        help="Also run other repositories' test/build commands (off by default; not read-only)",
+    ),
 ):
-    """Run read-only service and project health checks."""
+    """Run read-only service health checks."""
     try:
-        res = run_health(timeout_s=timeout)
+        res = run_health(timeout_s=timeout, include_projects=projects)
     except Exception as exc:
         console.print(f"[red]health failed:[/] {exc}")
         raise typer.Exit(1) from exc

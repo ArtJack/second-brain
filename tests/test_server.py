@@ -245,6 +245,22 @@ def test_require_auth_blocks_anonymous_everywhere_but_health(monkeypatch):
     monkeypatch.setenv("SB_WEB_REQUIRE_AUTH", "1")
     monkeypatch.delenv("SB_WEB_OWNER_TOKEN", raising=False)
 
+    # /health's own dependencies are faked because the subject of this test is
+    # the auth exemption, not the store or the model. Unfaked, the probe makes a
+    # real embedding call; the suite points that at a closed port, so /health
+    # answers 503 and the last assertion below fails for a reason that has
+    # nothing to do with auth. `test_health_checks_store_and_embedding` is where
+    # the probe's own behaviour is covered.
+    class FakeStore:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def count(self):
+            return 0
+
+    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "embed", lambda texts: [[0.0]])
+
     # Anonymous reads are refused outright — the tunnel makes this port
     # world-reachable, so "anonymous" must mean "turned away", not "public".
     assert client.post("/ask", json={"corpus": "public", "question": "hi"}).status_code == 401

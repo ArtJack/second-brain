@@ -6,8 +6,10 @@ deletes source files.
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -35,6 +37,34 @@ DEFAULT_CONFIG = {
         ".next",
         "Library",
         "data",
+        # Agent working trees hold copies of the same documents under a second
+        # path, which the store indexes as separate sources: the same note comes
+        # back two or three times and spends the answer's whole context budget.
+        ".claude",
+        ".codex",
+        ".pytest_cache",
+        ".vercel",
+        "dist",
+        "build",
+    ],
+    # Matched against the file name, case-insensitively. A supported suffix is
+    # not a licence to read a file: `.json`, `.yaml` and `.toml` are ingestible
+    # and are also what credentials are usually written in, and with a remote
+    # store the text leaves this machine. Lockfiles are excluded for a duller
+    # reason — thousands of chunks of dependency hashes crowd out real notes.
+    "exclude_globs": [
+        ".env*",
+        "*.env",
+        "*credential*",
+        "*secret*",
+        "*token*",
+        "*.pem",
+        "*.key",
+        ".mcp.json",
+        ".sops.yaml",
+        "settings.local.json",
+        "package-lock.json",
+        "*.lock",
     ],
     "max_file_mb": 25,
     "max_files_per_run": 250,
@@ -43,9 +73,16 @@ DEFAULT_CONFIG = {
 
 TASK_SOURCE_SUFFIXES = {".md", ".markdown", ".txt", ".rst"}
 
+# An explicit marker is the owner writing down work. These become durable tasks.
 TASK_PATTERNS = [
     re.compile(r"^\s*(?:[-*]\s*)?\[\s\]\s+(.{3,220})$"),
     re.compile(r"^\s*(?:TODO|FIXME|ACTION|FOLLOW[ -]?UP)\s*:?\s+(.{3,220})$", re.IGNORECASE),
+]
+
+# Prose that merely sounds like work. "You need to install Node 20 first" in a
+# downloaded README is a sentence about someone else's setup, not a commitment;
+# it is worth showing in the report and must never reach the task store.
+MENTION_PATTERNS = [
     re.compile(r"\b((?:need to|follow up with|remember to)\s+.{5,180})", re.IGNORECASE),
 ]
 
@@ -199,47 +236,99 @@ def discover_targets(config: dict[str, Any]) -> list[Path]:
     return targets
 
 
-def discover_supported_files(config: dict[str, Any]) -> list[Path]:
+def _excluded_by_glob(name: str, globs: list[str]) -> str | None:
+    """Return the rule that excludes this file name, or None."""
+    lowered = name.lower()
+    for rule in globs:
+        if fnmatch.fnmatch(lowered, rule.lower()):
+            return rule
+    return None
+
+
+@dataclass(frozen=True)
+class ScanResult:
+    files: list[Path]
+    skipped: list[dict[str, str]]
+
+
+def scan_targets(config: dict[str, Any]) -> ScanResult:
+    """Every supported file under the targets, and why each excluded one was dropped.
+
+    The walk is complete on purpose. `max_files_per_run` bounds the work a run
+    does, which is applied in run_overnight against *changed* files; bounding
+    discovery instead meant everything past the cap was invisible forever, in
+    whatever order the filesystem happened to return.
+    """
     skip_dirs = set(config.get("exclude_dirs", DEFAULT_CONFIG["exclude_dirs"]))
+    globs = list(config.get("exclude_globs", DEFAULT_CONFIG["exclude_globs"]))
     max_bytes = int(config.get("max_file_mb", DEFAULT_CONFIG["max_file_mb"])) * 1024 * 1024
-    max_files = int(config.get("max_files_per_run", DEFAULT_CONFIG["max_files_per_run"]))
     files: list[Path] = []
+    skipped: list[dict[str, str]] = []
+
+    def consider(path: Path) -> None:
+        if path.suffix.lower() not in SUPPORTED:
+            return
+        rule = _excluded_by_glob(path.name, globs)
+        if rule:
+            skipped.append({"path": str(path), "rule": rule})
+            return
+        try:
+            if path.stat().st_size > max_bytes:
+                skipped.append({"path": str(path), "rule": f">{max_bytes // (1024 * 1024)}MB"})
+                return
+        except OSError as exc:
+            skipped.append({"path": str(path), "rule": f"unreadable: {exc.strerror or exc}"})
+            return
+        files.append(path)
+
     for target in discover_targets(config):
-        candidates = [target] if target.is_file() else target.rglob("*")
-        for path in candidates:
-            if len(files) >= max_files:
-                return files
-            if not path.is_file():
+        if target.is_file():
+            consider(target)
+            continue
+        for dirpath, dirnames, filenames in os.walk(target):
+            # Pruning in place stops the walk descending into an excluded tree
+            # at all, instead of stat-ing every file inside it and discarding
+            # the results one by one.
+            dirnames[:] = [name for name in dirnames if name not in skip_dirs]
+            here = Path(dirpath)
+            if _is_under_skip_dir(here, skip_dirs):
                 continue
-            if path.suffix.lower() not in SUPPORTED:
-                continue
-            if _is_under_skip_dir(path, skip_dirs):
-                continue
-            try:
-                if path.stat().st_size > max_bytes:
-                    continue
-            except OSError:
-                continue
-            files.append(path)
-    return sorted(files)
+            for name in filenames:
+                consider(here / name)
+
+    return ScanResult(files=sorted(files), skipped=sorted(skipped, key=lambda item: item["path"]))
 
 
-def extract_tasks(text: str, limit: int = 12) -> list[str]:
-    tasks: list[str] = []
+def discover_supported_files(config: dict[str, Any]) -> list[Path]:
+    return scan_targets(config).files
+
+
+def _extract(text: str, patterns: list[re.Pattern[str]], limit: int) -> list[str]:
+    found: list[str] = []
     seen: set[str] = set()
     for line in text.splitlines():
-        for pattern in TASK_PATTERNS:
+        for pattern in patterns:
             match = pattern.search(line)
             if not match:
                 continue
-            task = re.sub(r"\s+", " ", match.group(1)).strip(" .:-")
-            if task and task.lower() not in seen:
-                tasks.append(task)
-                seen.add(task.lower())
+            item = re.sub(r"\s+", " ", match.group(1)).strip(" .:-")
+            if item and item.lower() not in seen:
+                found.append(item)
+                seen.add(item.lower())
             break
-        if len(tasks) >= limit:
+        if len(found) >= limit:
             break
-    return tasks
+    return found
+
+
+def extract_tasks(text: str, limit: int = 12) -> list[str]:
+    """Work the owner wrote down explicitly. These may become durable tasks."""
+    return _extract(text, TASK_PATTERNS, limit)
+
+
+def extract_mentions(text: str, limit: int = 12) -> list[str]:
+    """Sentences that sound like work. Reported for a human to read, never synced."""
+    return _extract(text, MENTION_PATTERNS, limit)
 
 
 def _snippet(text: str, limit: int = 360) -> str:
@@ -266,20 +355,29 @@ def run_overnight(*, root: Path | None = None, dry_run: bool = False) -> dict[st
     started_at = _now()
     run_id = state.start_run(started_at)
 
-    stats = {"scanned": 0, "changed": 0, "ingested": 0, "failed": 0}
+    scan = scan_targets(config)
+    max_changed = int(config.get("max_files_per_run", DEFAULT_CONFIG["max_files_per_run"]))
+    stats = {"scanned": 0, "changed": 0, "ingested": 0, "failed": 0, "skipped": len(scan.skipped), "deferred": 0}
     changed_files: list[dict[str, Any]] = []
     failed_files: list[dict[str, str]] = []
 
-    for path in discover_supported_files(config):
+    for path in scan.files:
         stats["scanned"] += 1
         try:
             stat = path.stat()
             sha = _sha256(path)
             if not state.file_changed(path, sha, stat.st_size, stat.st_mtime):
                 continue
+            if stats["changed"] >= max_changed:
+                # The budget is spent. Leave the file unrecorded so the next run
+                # sees it as changed and picks it up, and say how many there are.
+                stats["deferred"] += 1
+                continue
             stats["changed"] += 1
             text = read_file(path)
-            tasks = extract_tasks(text) if path.suffix.lower() in TASK_SOURCE_SUFFIXES else []
+            is_prose = path.suffix.lower() in TASK_SOURCE_SUFFIXES
+            tasks = extract_tasks(text) if is_prose else []
+            mentions = extract_mentions(text) if is_prose else []
             chunks = 0 if dry_run else _ingest_one(path)
             if not dry_run:
                 state.remember_file(path, sha, stat.st_size, stat.st_mtime, chunks)
@@ -290,6 +388,7 @@ def run_overnight(*, root: Path | None = None, dry_run: bool = False) -> dict[st
                     "size": stat.st_size,
                     "chunks": chunks,
                     "tasks": tasks,
+                    "mentions": mentions,
                     "snippet": _snippet(text),
                 }
             )
@@ -304,6 +403,7 @@ def run_overnight(*, root: Path | None = None, dry_run: bool = False) -> dict[st
         stats=stats,
         changed_files=changed_files,
         failed_files=failed_files,
+        skipped_files=scan.skipped,
         dry_run=dry_run,
     )
     state.finish_run(run_id, stats=stats, report_path=report)
@@ -332,7 +432,9 @@ def write_report(
     changed_files: list[dict[str, Any]],
     failed_files: list[dict[str, str]],
     dry_run: bool,
+    skipped_files: list[dict[str, str]] | None = None,
 ) -> Path:
+    skipped_files = skipped_files or []
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     report_path = paths.reports / f"{stamp}-run-{run_id}.md"
     mode = "dry run" if dry_run else "read-only source scan"
@@ -345,6 +447,8 @@ def write_report(
         f"- New or changed files: {stats['changed']}",
         f"- Ingested files: {stats['ingested']}",
         f"- Failed files: {stats['failed']}",
+        f"- Skipped by rule: {stats.get('skipped', 0)}",
+        f"- Deferred to a later run: {stats.get('deferred', 0)}",
         "",
         "## Changed Files",
         "",
@@ -367,10 +471,24 @@ def write_report(
             for task in item["tasks"]:
                 lines.append(f"- {task}")
             lines.append("")
+        if item.get("mentions"):
+            # A separate heading, because `task-sync` reads "Possible tasks:"
+            # and only that. These are for a human to read and act on or ignore.
+            lines.append("Mentions (not tasks):")
+            for mention in item["mentions"]:
+                lines.append(f"- {mention}")
+            lines.append("")
     lines.extend(["## Failures", ""])
     if not failed_files:
         lines.append("None.")
     for item in failed_files:
         lines.append(f"- `{item['path']}`: {item['error']}")
+    lines.extend(["", "## Skipped By Rule", ""])
+    if not skipped_files:
+        lines.append("None.")
+    for item in skipped_files[:50]:
+        lines.append(f"- `{item['path']}` ({item['rule']})")
+    if len(skipped_files) > 50:
+        lines.append(f"- ...and {len(skipped_files) - 50} more")
     report_path.write_text("\n".join(lines).rstrip() + "\n")
     return report_path

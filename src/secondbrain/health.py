@@ -36,10 +36,19 @@ def latest_health_report(root: Path | None = None) -> Path | None:
     return reports[0] if reports else None
 
 
-def run_health(*, output_dir: Path | None = None, timeout_s: int = 45) -> dict:
+def run_health(*, output_dir: Path | None = None, timeout_s: int = 45, include_projects: bool = False) -> dict:
+    """Probe this system's own services; optionally also run other projects' suites.
+
+    `include_projects` is off by default and the nightly does not pass it.
+    Discovering repositories from the ingest targets and running their test and
+    build commands is neither read-only nor this program's job — and the child
+    inherits this process's environment, which `config` has already filled from
+    `.env`. Project QA belongs to the QA system; this stays a health check.
+    """
     checks: list[HealthCheck] = []
     checks.extend(_service_checks(timeout_s=min(timeout_s, 10)))
-    checks.extend(_project_checks(timeout_s=timeout_s))
+    if include_projects:
+        checks.extend(_project_checks(timeout_s=timeout_s))
 
     out_dir = health_dir(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -81,17 +90,33 @@ def render_health_report(*, stamp: str, checks: list[HealthCheck]) -> str:
 
 
 def _service_checks(timeout_s: int) -> list[HealthCheck]:
-    return [
-        _http_check("ollama", _ollama_url(), timeout_s=timeout_s),
-        _http_check("qdrant", cfg.qdrant_url.rstrip("/") + "/collections", timeout_s=timeout_s),
-        _launchd_check("com.secondbrain.overnight"),
-    ]
+    """Ask each configured dependency whether it is up — and ask nothing else.
+
+    This used to probe Ollama's native `/api/tags` whatever `OPENAI_BASE_URL`
+    pointed at, so every night the gateway answered 404 and the report said
+    "FAIL ollama" about a service that was fine. A check that is always red is a
+    check nobody reads, which is how a genuinely red CI went unnoticed for two
+    weeks. Qdrant is likewise only probed when it is the configured store.
+    """
+    checks = [_http_check("llm", _llm_url(), timeout_s=timeout_s)]
+    if cfg.store_backend == "qdrant":
+        checks.append(_http_check("qdrant", cfg.qdrant_url.rstrip("/") + "/collections", timeout_s=timeout_s))
+    else:
+        checks.append(
+            HealthCheck(name="store", status="pass", detail=f"{cfg.store_backend} at {cfg.persist_dir}")
+        )
+    checks.append(_launchd_check("com.secondbrain.overnight"))
+    return checks
 
 
-def _ollama_url() -> str:
+def _llm_url() -> str:
+    """The OpenAI-compatible model list: answered by Ollama and by the gateway alike."""
+    base = cfg.base_url.rstrip("/")
+    if base.endswith("/v1"):
+        return base + "/models"
     parsed = urlparse(cfg.base_url)
-    base = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else cfg.base_url.rstrip("/v1")
-    return base.rstrip("/") + "/api/tags"
+    origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else base
+    return origin.rstrip("/") + "/v1/models"
 
 
 def _http_check(name: str, url: str, *, timeout_s: int) -> HealthCheck:
@@ -100,6 +125,8 @@ def _http_check(name: str, url: str, *, timeout_s: int) -> HealthCheck:
         headers = {}
         if name == "qdrant" and cfg.qdrant_api_key:
             headers["api-key"] = cfg.qdrant_api_key
+        if name == "llm" and cfg.api_key:
+            headers["Authorization"] = f"Bearer {cfg.api_key}"
         request = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
             status = getattr(response, "status", 200)
@@ -203,8 +230,17 @@ def _elapsed_ms(start: datetime) -> int:
 
 
 def _clean_env() -> dict[str, str]:
+    """The child's environment, with this process's secrets removed.
+
+    `config` calls `load_dotenv()` at import, so by the time a check runs, the
+    API key, the store key and the MCP token are all in `os.environ`. A test
+    command in someone else's repository has no business receiving them.
+    """
     env = os.environ.copy()
     env.pop("VIRTUAL_ENV", None)
+    for name in list(env):
+        if any(marker in name.upper() for marker in ("API_KEY", "TOKEN", "SECRET", "PASSWORD")):
+            env.pop(name, None)
     return env
 
 
