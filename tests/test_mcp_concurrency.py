@@ -31,7 +31,16 @@ def test_every_tool_is_a_coroutine():
 
 
 def test_a_slow_tool_does_not_block_another(monkeypatch):
-    """The property that matters: progress while a model call is in flight."""
+    """The property that matters: progress while a model call is in flight.
+
+    Asserted as an *ordering*, not a wall-clock budget. The first version of
+    this test measured how long `status` took and required under 0.25s against
+    a 0.4s sleep — about 0.1s of headroom over the blocked case, which a shared
+    CI runner ate: it failed at 0.26s on a green branch. That number was never
+    the claim. The claim is that `status` finishes while `ask` is still in
+    flight, and if the loop is blocked it cannot, at any speed of machine.
+    """
+    finished: list[str] = []
 
     def slow_ask(question, k=None, collection=None, **kw):
         time.sleep(0.4)
@@ -51,18 +60,28 @@ def test_a_slow_tool_does_not_block_another(monkeypatch):
     monkeypatch.setattr(mcp_server, "Store", lambda *a, **kw: FastStore())
 
     async def scenario():
-        slow = asyncio.create_task(mcp_server.ask("anything"))
-        await asyncio.sleep(0.05)
-        started = time.perf_counter()
-        quick = await mcp_server.status()
-        waited = time.perf_counter() - started
-        await slow
-        return quick, waited
+        async def run_ask():
+            result = await mcp_server.ask("anything")
+            finished.append("ask")
+            return result
 
-    quick, waited = asyncio.run(scenario())
+        async def run_status():
+            result = await mcp_server.status()
+            finished.append("status")
+            return result
+
+        slow = asyncio.create_task(run_ask())
+        await asyncio.sleep(0.05)  # let the slow tool reach its blocking call
+        quick = await run_status()
+        await slow
+        return quick
+
+    quick = asyncio.run(scenario())
 
     assert quick["chunks"] == 7
-    assert waited < 0.25, f"status waited {waited:.2f}s behind a slow ask — the loop is blocked"
+    assert finished == ["status", "ask"], (
+        f"status did not finish while ask was in flight (order: {finished}) — the loop is blocked"
+    )
 
 
 def test_the_llm_client_has_a_bounded_timeout():
