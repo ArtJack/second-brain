@@ -57,9 +57,12 @@ jobs:
       - name: Install
         run: npm ci
       - name: Typecheck
-        # The proxy holds the corpus gate and the owner-session check. Until it
-        # has tests, a typecheck is the only automated statement about it at all.
         run: npx tsc --noEmit
+      - name: Test
+        # The proxy holds the corpus gate and the owner-session check. A
+        # typecheck can only say the refusal has the right types, not that it
+        # happens — so these assert that the boundary fails closed.
+        run: npm test
       - name: Lint
         run: npm run lint
       - name: Build
