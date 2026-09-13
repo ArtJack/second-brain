@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .ask import ask
+from .ask import ask, recall
 from .citations import REFUSAL_MARKER, cited_numbers, invalid_citations
 from .config import cfg
 from .hybrid import hybrid_retrieve
@@ -140,6 +140,20 @@ def _default_retrieve(query: str, top_k: int) -> list[dict]:
         return []
     qvec = embed([query])[0]
     return hybrid_retrieve(store, query, qvec, top_k, enabled=cfg.hybrid_enabled)
+
+
+def recall_retrieve(query: str, top_k: int) -> list[dict]:
+    """Retrieve through `recall`, the path the MCP tool and `sb recall` take.
+
+    `_default_retrieve` calls `hybrid_retrieve` itself, which measures what `ask`
+    builds answers from and nothing else: `recall` could retrieve differently and
+    no reading would show it. Its hits are re-shaped into what the scorer reads,
+    with nothing added that recall did not return.
+    """
+    return [
+        {"document": hit["text"], "metadata": {"source": hit["source"]}, "distance": hit["distance"]}
+        for hit in recall(query, top_k=top_k)["hits"]
+    ]
 
 
 def _default_answer(

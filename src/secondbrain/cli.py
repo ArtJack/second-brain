@@ -15,7 +15,7 @@ from .ask import ask as ask_fn
 from .ask import recall as recall_fn
 from .browser_check import DEFAULT_BROWSER_DIR, capture_url
 from .config import cfg, collections_for
-from .evals import DEFAULT_BENCHMARK, load_benchmark, resolve_corpus_paths, run_benchmark, select_cases
+from .evals import DEFAULT_BENCHMARK, load_benchmark, recall_retrieve, resolve_corpus_paths, run_benchmark, select_cases
 from .gc import GarbageCollectionRefused, collect_garbage
 from .health import run_health
 from .ingest import ingest_paths, last_report
@@ -228,6 +228,7 @@ def evaluate(
     tag: list[str] | None = typer.Option(None, "--tag", help="Run cases with this tag; repeat for more tags"),
     trace_output: Path | None = typer.Option(None, "--trace-output", help="Write standalone trace/span/trajectory JSON"),
     json_output: bool = typer.Option(False, "--json", help="Print the full JSON report"),
+    via_recall: bool = typer.Option(False, "--via-recall", help="Score retrieval through recall, the MCP tool's path"),
 ):
     """Run the local retrieval benchmark and optional grounded-answer checks."""
     try:
@@ -251,7 +252,13 @@ def evaluate(
                     files += 1
                     chunks += n
             corpus_ingest = {"paths": [str(path) for path in corpus_paths], "files": files, "chunks": chunks}
-        report = run_benchmark(select_cases(loaded, tag), top_k=k, include_answers=answers)
+        report = run_benchmark(
+            select_cases(loaded, tag),
+            top_k=k,
+            include_answers=answers,
+            retrieve_fn=recall_retrieve if via_recall else None,
+        )
+        report["retriever"] = "recall" if via_recall else "hybrid_retrieve"
         if corpus_ingest:
             report["corpus_ingest"] = corpus_ingest
         if trace_output:
@@ -271,7 +278,7 @@ def evaluate(
                 f"ingested benchmark corpus: [bold]{corpus_ingest['files']}[/] file(s), "
                 f"[bold]{corpus_ingest['chunks']}[/] chunk(s)"
             )
-        table = Table(title=f"evaluation: {report['benchmark']}")
+        table = Table(title=f"evaluation: {report['benchmark']}" + (" via recall" if via_recall else ""))
         table.add_column("case")
         table.add_column("retrieval", justify="center")
         table.add_column("rank", justify="right")

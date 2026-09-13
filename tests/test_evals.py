@@ -493,3 +493,68 @@ class TestScoringNothingIsNotPassing:
         report = run_benchmark(_benchmark([]), retrieve_fn=lambda q, k: [])
 
         assert report["passed"] is False
+
+
+class TestScoringThroughRecall:
+    """`sb eval` scored `hybrid_retrieve` directly, so no reading could show a change to `recall`.
+
+    The MCP server tells agents to ground themselves with `recall`. Until
+    2026-09-12 it searched vectors only while every benchmark reading used hybrid, and
+    the gate on retrieval changes had no way to see the path agents take.
+    `--via-recall` scores what `recall` returns instead.
+    """
+
+    def test_recall_retrieve_scores_exactly_what_recall_returned(self, monkeypatch):
+        from secondbrain import evals
+
+        seen = {}
+
+        def fake_recall(query, top_k=0):
+            seen.update(query=query, top_k=top_k)
+            return {
+                "count": 1,
+                "hits": [{"source": "/Users/artjack/notes/lab.md", "distance": 0.1234, "text": "the answering passage"}],
+            }
+
+        monkeypatch.setattr(evals, "recall", fake_recall)
+
+        report = run_benchmark(
+            _benchmark([_case(expected_chunk_contains=["answering passage"])]),
+            top_k=4,
+            retrieve_fn=evals.recall_retrieve,
+        )
+
+        assert seen == {"query": "where is the gateway?", "top_k": 4}
+        retrieval = report["cases"][0]["retrieval"]
+        assert retrieval["retrieved_sources"] == ["/Users/artjack/notes/lab.md"]
+        assert retrieval["passage_recall"] == 1.0
+        assert report["passed"] is True
+
+    def test_the_cli_flag_scores_through_recall_and_the_report_says_which_path_ran(self, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        from secondbrain import cli, evals
+
+        monkeypatch.setattr(evals, "_default_retrieve", lambda query, top_k: [_hit("/elsewhere/engine.md")])
+        monkeypatch.setattr(
+            evals,
+            "recall",
+            lambda query, top_k=0: {
+                "count": 1,
+                "hits": [{"source": "/Users/artjack/notes/lab.md", "distance": 0.1, "text": "context"}],
+            },
+        )
+        benchmark = tmp_path / "benchmark.json"
+        benchmark.write_text(json.dumps(_benchmark([_case()])), encoding="utf-8")
+
+        via_recall = CliRunner().invoke(cli.app, ["eval", str(benchmark), "--via-recall", "--json"])
+        default = CliRunner().invoke(cli.app, ["eval", str(benchmark), "--json"])
+
+        recall_report, default_report = json.loads(via_recall.stdout), json.loads(default.stdout)
+        assert recall_report["retriever"] == "recall"
+        assert recall_report["cases"][0]["retrieval"]["retrieved_sources"] == ["/Users/artjack/notes/lab.md"]
+        assert via_recall.exit_code == 0
+        # The default is untouched: still hybrid_retrieve, and still failing this case.
+        assert default_report["retriever"] == "hybrid_retrieve"
+        assert default_report["cases"][0]["retrieval"]["retrieved_sources"] == ["/elsewhere/engine.md"]
+        assert default.exit_code == 1

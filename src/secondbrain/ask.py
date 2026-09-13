@@ -114,7 +114,7 @@ def recall(query: str, top_k: int = 0, collection: str | list[str] | None = None
     qvec = embed([query])[0]
     hits = []
     for store in populated:
-        hits.extend(store.query(qvec, k))
+        hits.extend(hybrid_retrieve(store, query, qvec, k, enabled=cfg.hybrid_enabled))
     if len(populated) > 1:
         hits.sort(key=lambda hit: hit["distance"])
         hits = hits[:k]
