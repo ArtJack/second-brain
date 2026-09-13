@@ -1,5 +1,114 @@
 # second-brain eval results
 
+## 2026-09-12 — `recall` retrieves through `hybrid_retrieve`
+
+The MCP server tells agents that `recall` is the cheapest way to ground
+themselves, and `recall` searched vectors only. `ask` retrieves through
+`hybrid_retrieve`; `recall` called `store.query` directly and ignored
+`SB_HYBRID`, so an agent grounding itself through it never got the keyword half
+of retrieval. It now makes the same `hybrid_retrieve` call `ask` makes.
+
+`sb eval` could not show this change, or the gap it closes. It scores
+`hybrid_retrieve` directly, so no reading in this file ever measured the path
+`recall` took. `sb eval --via-recall` scores what `recall` itself returns, and
+the JSON report now names the path that ran as `retriever`.
+
+Retrieval only, k=5, Qdrant, embeddings through the LiteLLM gateway, chat model
+not called. Both benchmarks were ingested once into collections no other session
+uses, `second_brain_recall_hybrid_hard` and `second_brain_recall_hybrid_regression`,
+and every reading below ran against that one state: before and after the change,
+through both paths, with `SB_HYBRID` on and off. The absolute numbers differ from
+earlier entries, precision most, because the shared `second_brain_regression`
+collection holds two copies of its eight fixtures. Compare before with after
+here, not with the entries below.
+
+### The recall path, `SB_HYBRID=1`
+
+| metric | hard before | hard after | regression before | regression after |
+|---|---:|---:|---:|---:|
+| passed / cases | 13 / 18 | **14 / 18** | 21 / 22 | **22 / 22** |
+| hit_rate | 72.2% | **77.8%** | 95.5% | **100%** |
+| source_recall | 94.4% | **100%** | 95.5% | **100%** |
+| mrr | 0.861 | **0.870** | 0.932 | **1.000** |
+| mean_precision | 30.0% | 30.0% | 22.7% | **23.6%** |
+| passage_recall | 94.1% | **100%** | not asked | not asked |
+| distractor_rate | 100% | 100% | not asked | not asked |
+
+One case moved on each: `adjacency-is-not-evidence` on the hard set and
+`lab-paid-cap` on the regression set. Both already passed through `ask`'s
+retrieval, and neither passed through `recall`.
+
+Per-case results, compared field by field (sources, ranks, passages, precision):
+
+| comparison | hard, 20 cases | regression, 26 cases |
+|---|---:|---:|
+| before, on 0754a16: recall at `SB_HYBRID=1` = `sb eval` at `SB_HYBRID=0` | 20 identical | 26 identical |
+| after: recall at `SB_HYBRID=1` = `sb eval` at `SB_HYBRID=1` | 20 identical | 26 identical |
+| after: recall at `SB_HYBRID=0` = `sb eval` at `SB_HYBRID=0` | 20 identical | 26 identical |
+| `sb eval` on 0754a16, before = after, at either setting | 20 identical | 26 identical |
+
+Before, `recall` searched vectors only, whatever the flag said. After, it returns
+exactly what `ask` retrieves and still obeys the flag. The last row is why
+`sb eval` alone could not gate this: it reads the same on both sides of the change.
+
+Rebased onto #48 and read again, every benchmark reading above came back identical
+case for case, and `sb eval` at `SB_HYBRID=0` still matches `recall` before this
+change on all 46 cases. The two rows marked 0754a16 need the code from before this
+change, which the rebased branch no longer has.
+
+### What the benchmark could not measure
+
+On the live `second_brain_v2` collection, read-only, through the `recall` tool
+function and again through a stdio `sb-mcp` session started from the change,
+which returned the same hits. In all four probes `recall` returned exactly what
+`hybrid_retrieve` did. These readings were taken again after rebasing onto #48,
+which keeps identifiers whole in keyword search, with the collection at 3,941
+chunks. "Before" is the vector-only top 5, which is what `recall` returned before
+this change.
+
+The probe queries are described below rather than quoted. This file is itself
+ingested, and a quoted query makes it the strongest keyword match for that query
+while it says nothing about the subject.
+
+| probe | hits from outside the vector top 5 | top-5 chunks matching the target |
+|---|---:|---:|
+| the plain-language question from the defect report | 0 → 3 | n/a |
+| an issue id built from hyphenated one- and two-character parts | 0 → 3 | **0 → 3** holding the id |
+| a two-word Cyrillic query | 0 → 2 | 5 → 5 with any Cyrillic text |
+| a lookup by numbered heading | 0 → 3 | 0 → 2 holding the heading |
+
+Before, every distance sat in the vector range, 0.33 to 0.48. After, each result
+interleaves keyword hits at 0.05 to 0.15 with vector hits at 0.33 to 0.46. The
+plain-language probe now returns keyword hits at 0.150 to 0.152 beside vector
+hits at 0.434 and 0.435.
+
+**With #48, the id probe finds the id.** Keyword search now matches the id as one
+term, finds exactly the three chunks that hold it, and ranks them 1st to 3rd, so
+all three reach `recall`. On 0754a16, before #48, the same probe returned none of
+them. The id split at its hyphens into three very short terms matched separately,
+and the chunks holding it ranked 5th to 7th, outside fusion's three keyword
+slots. SB-F-31's length filter did not cause that miss, since its fallback kept
+all three terms; keeping the id whole is what fixed it. The heading lookup is
+different: on 0754a16 the filter dropped its number and one chunk holding the
+heading reached the top 5, and with the number kept, two do. `recall` gets
+whatever keyword search returns, so #48's gains reach it directly. The Cyrillic
+probe needed no rescue, because vector search already found it.
+
+The cost, over the four probes on the rebased tree: the retrieval step's median
+rose from 24.2 ms to 30.2 ms (36 samples each), and `recall` end to end, embedding
+included, from 151 ms to 161 ms (20 samples each).
+
+### What did not change
+
+`ask`, the fusion logic and the `k` defaults are untouched, and the tool still
+returns `count` and `hits` of `source`, `distance` and `text`. Two properties
+`ask` already had now apply to `recall` too: a keyword hit's `distance` is
+`1/(1+bm25)`, not a cosine distance, and a search across both corpora sorts on
+that mixed scale. The web API's `/recall` route calls the same function, and a
+test now checks through that route that the public corpus's keyword search never
+reaches the owner's collection. The running `com.secondbrain.mcp` and
+`com.artjeck.sb-web` services pick this up only on their next restart.
+
 ## 2026-09-12 — keyword search keeps identifiers
 
 A production `ask` that named an identifier answered NOT_IN_SOURCES, although three
