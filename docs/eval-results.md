@@ -1,5 +1,95 @@
 # second-brain eval results
 
+## 2026-09-12 — keyword search keeps identifiers
+
+A production `ask` that named an identifier answered NOT_IN_SOURCES, although three
+chunks of the live collection contain it. Every part of the identifier is two
+characters or shorter, so the filter that drops short words took all of them, and
+keyword search ran on the question's three remaining words. Those words are in 818,
+719 and 275 of the 3,939 live chunks, and none of the three chunks containing the
+identifier reached the keyword top 20.
+
+A span containing a digit is now kept whole: a hyphenated identifier, an address
+with a port, a date, or a bare number. It is quoted like every other term, and
+FTS5 reads a quoted run of tokens as a phrase, so an identifier matches its tokens
+adjacent and in order. Short ordinary words are still dropped, and a question
+without a digit searches exactly the terms it did before; a test pins six such
+questions, their terms and their rankings. When the filter leaves nothing but
+identifiers, the question's other short words stay, as the old fallback kept them,
+so a pull request asked for by number still searches `pr` beside the number.
+Stopwords, single letters and the pieces of a joined identifier do not come back.
+
+Short acronyms without a digit are unchanged: `AI`, `Go` and `R` are still dropped,
+so SB-F-31 stays open for them.
+
+This entry and the new tests do not name the identifier the production question
+asked about, do not quote that question, and keep its common words out of their
+examples. The nightly ingests both, and text that concentrates a question's words
+outranks the chunks that answer it (SB-F-55).
+
+### Benchmarks: no movement, which is what this change predicts
+
+Same machine, same day, k=5, `SB_HYBRID=1`, Qdrant, each corpus re-ingested for
+each reading.
+
+| metric | regression before | regression after | hard before | hard after |
+|---|---:|---:|---:|---:|
+| retrieval passed / cases | 22 / 22 | 22 / 22 | 14 / 18 | 14 / 18 |
+| hit rate | 100% | 100% | 77.8% | 77.8% |
+| source recall | 100% | 100% | 100% | 100% |
+| MRR | 1.000 | 1.000 | 0.870 | 0.870 |
+| precision | 23.6% | 23.6% | 30.0% | 30.0% |
+| passage recall | not asked | not asked | 100% | 100% |
+| distractor rate | not asked | not asked | 100% | 100% |
+
+Every case's first relevant rank is unchanged as well, and the same four
+distractor cases fail. 44 of the 46 benchmark queries search exactly the terms
+they did before. The two that change each gain one term with a digit in it:
+`abstain-calendar`, an abstention case that is not scored for retrieval, and
+`rare-identifier-key-generation`, whose correct source already ranked first. So
+these benchmarks guard against the stopword regression coming back, and they
+cannot show this fix: neither scores a question with an identifier inside a
+sentence, which is the production failure.
+
+**Measured in collections of its own.** These readings come from
+`sb_eval_kwident_regression` and `sb_eval_kwident_hard`, not the shared
+`second_brain_regression` and `second_brain_hard`. Another session measured at
+the same time, and chunk identity includes the source path, so ingesting the
+corpus from a worktree would have added a second copy to a shared collection
+rather than replacing the first. The private collections hold each fixture once.
+`second_brain_regression` holds all eight twice, under the absolute path and
+under the relative `evals/corpus`, and the 47.3% precision recorded below, almost
+exactly double the 23.6% here, is consistent with both copies being counted.
+`second_brain_hard` holds no duplicates, and why its recorded 31.1% differs from
+the 30.0% here is not established. Before and after share one collection each,
+so the comparison stands.
+
+### The live collection, where the fix shows
+
+Read-only against `second_brain_v2` through its FTS5 index, `main`'s rule against
+this change's, k=5. Keyword search contributes its top 3 to fusion.
+
+| question | chunks naming it in keyword top 3, before → after | in hybrid top 5, before → after |
+|---|---|---|
+| the production question: an identifier inside a sentence | 0 → 3 | 0 → 3 (ranks 1, 3, 5) |
+| the same identifier on its own | 0 → 3 (they ranked 5, 6 and 7) | 0 → 3 (ranks 1, 3, 5) |
+| another identifier after "what is" | 1, at rank 2 → 1, at rank 1 and alone | rank 3 → rank 1 |
+| a section number beside three ordinary words | 2 → 3 | 2 → 3 |
+
+**What it costs.** A bare number is kept too, because that is what a PR or port
+number is, and bare numbers are common. A how-to question with a count in it now
+also searches the count, a token in 1,466 live chunks: its keyword top 3 holds the
+same three chunks, and its hybrid top 5 is identical. A question about a recent
+pull request by number now also searches the number, which is in 101 live chunks,
+none of them naming that pull request, so its keyword top 3 trades one set of
+unrelated chunks for another and three of its hybrid top 5 change the same way.
+
+**Not changed:** the fallback scan in `hybrid.py`, used for a collection with no
+keyword index, tokenizes with its own `[a-z0-9]+` and still drops identifiers. A
+process whose working directory points a relative `SB_STATE_DB` at an empty index
+takes that scan without saying so (SB-F-59). The launchd services and the
+stdio MCP server configured in `~/.claude.json` all start in the checkout.
+
 ## 2026-09-12 — what the 100% distractor rate actually costs: tokens, not correctness
 
 This corrects the entry below it. When the hard benchmark first reported that all
