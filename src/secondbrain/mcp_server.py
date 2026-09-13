@@ -38,6 +38,7 @@ from .ask import ask as ask_fn
 from .ask import recall as recall_fn
 from .config import cfg, collections_for
 from .ingest import ingest_paths
+from .keyword_index import KeywordIndex
 from .memory import learn as learn_memory
 from .store import Store
 from .tasks import TaskStore
@@ -45,6 +46,9 @@ from .tasks import TaskStore
 # stdout is the protocol channel for stdio transport — never log there.
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("secondbrain.mcp")
+
+# Every chunk also lives in the keyword index, so a delete here must reach it too.
+_index = KeywordIndex()
 
 def _transport_security() -> TransportSecuritySettings:
     """Allow-list the hosts clients reach us on (DNS-rebinding protection stays ON).
@@ -214,6 +218,9 @@ async def forget(memory_file: str) -> dict:
     def _run() -> dict:
         store = Store()
         store.delete_source(str(resolved))
+        # Deleting from the store alone left the memory findable by keyword, and
+        # `ask` kept building answers from a memory the owner had forgotten.
+        _index.delete_source(getattr(store, "collection_name", None) or cfg.collection, str(resolved))
         existed = resolved.exists()
         if existed:
             resolved.unlink()
