@@ -29,6 +29,11 @@ from .config import cfg
 # as readily as ASCII — the whole point of replacing the old [a-z0-9]+ tokenizer.
 _WORD = re.compile(r"\w+", re.UNICODE)
 
+# A run of words joined the way identifiers are written: `XX-F-12`, `192.0.2.7:9`,
+# `1999-01-02`. Not by `/`, which separates rather than joins: `XX-F-12/13` names
+# two identifiers, and as one phrase it would match neither.
+_SPAN = re.compile(r"\w+(?:[-.:]\w+)*", re.UNICODE)
+
 # Terms carried over from the hand-rolled scorer this replaces. Dropping them is
 # not cosmetic: the match expression joins terms with OR, so leaving "what", "is"
 # and "the" in a question makes every document containing them a candidate and
@@ -49,10 +54,36 @@ def query_terms(text: str) -> list[str]:
     and any language whose function words are not in an English stopword list —
     a Russian query keeps all of its terms, which is correct, because none of
     them are in the set above.
+
+    Identifiers are the exception to the length filter, because their short parts
+    are the most specific words a question has. A production question that named an
+    identifier lost every part of it to the filter and searched only its common
+    words, which matched hundreds of chunks and left the few containing the
+    identifier out of the top twenty. So a span with a digit in it is kept whole,
+    and `query` quotes it like any other term, which FTS5 reads as a phrase: the
+    tokens adjacent and in order. As loose parts it would match almost anything,
+    because one- and two-character tokens are among the commonest in the corpus.
+    The digit is what separates an identifier from `re-ingest`, so a question
+    without one searches exactly the terms it did before. A span the filter
+    already kept, such as `8765`, is not added again, which would double its weight.
+
+    When the filter leaves nothing but identifiers, the question's other short
+    words stay, as the fallback kept them before: a pull request asked for by
+    number still searches `pr` beside the number. Stopwords stay out, and so do
+    single letters, which are fragments such as the `s` of "what's", and the pieces
+    of a joined identifier, which the identifier itself stands in for.
     """
-    words = _WORD.findall(text.lower())
+    lowered = text.lower()
+    words = _WORD.findall(lowered)
     meaningful = [word for word in words if word not in STOPWORDS and len(word) > 2]
-    return meaningful or words
+    spans = [span for span in dict.fromkeys(_SPAN.findall(lowered)) if re.search(r"\d", span)]
+    identifiers = [span for span in spans if span not in meaningful]
+    if not identifiers:
+        return meaningful or words
+    if not meaningful:
+        pieces = {word for span in spans for word in _WORD.findall(span)}
+        return [word for word in words if len(word) > 1 and word not in STOPWORDS and word not in pieces] + identifiers
+    return meaningful + identifiers
 
 
 def _require_fts5() -> None:
