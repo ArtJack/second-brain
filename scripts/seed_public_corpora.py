@@ -8,6 +8,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from secondbrain import ingest
 from secondbrain.ingest import ingest_paths
 from secondbrain.store import Store
 
@@ -72,6 +73,11 @@ def seed_collection(collection: str, relatives: list[str]) -> dict:
     files = chunks = 0
     print(f"\nSeeding {collection}")
     Store(collection=collection).reset()
+    # ingest_paths replaces a file's keyword rows only when it ingests that file
+    # again, so the rows of a file dropped from CORPORA would outlive this reseed.
+    # Reset through ingest's own index: another KeywordIndex would drop the table
+    # behind the cache ingest's instance keeps, and ingest's next write would raise.
+    ingest._index.reset(collection)
     for relative in relatives:
         _safe_repo_path(relative)
         for file_path, n_chunks in ingest_paths(Path(relative), collection=collection):

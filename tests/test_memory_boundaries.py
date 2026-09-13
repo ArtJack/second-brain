@@ -155,6 +155,40 @@ class TestForget:
         assert elsewhere.exists(), "forget must not be a general-purpose delete"
         assert store.deleted == []
 
+    def test_forget_removes_the_memory_from_keyword_search_too(self, tmp_path, monkeypatch):
+        """SB-F-52: a forgotten memory stayed findable by keyword.
+
+        Every chunk lives in two copies, the vector store and the keyword index, and
+        every other delete writes to both. `forget` wrote to the store alone, so the
+        keyword search that `ask` fuses into its context, and that hybrid `recall`
+        returns word for word, kept finding the memory the owner had just forgotten.
+        """
+        from secondbrain import hybrid
+        from secondbrain import mcp_server as m
+        from secondbrain.keyword_index import KeywordIndex
+
+        memories = tmp_path / "memories"
+        memories.mkdir()
+        monkeypatch.setattr(m.cfg, "memory_dir", memories)
+        forgotten = memories / "a-memory.md"
+        forgotten.write_text("zephyrquill: a placeholder the owner asked to forget")
+        kept = memories / "another-memory.md"
+        kept.write_text("zephyrquill: a placeholder that stays")
+        store = FakeStore()
+        monkeypatch.setattr(m, "Store", lambda *a, **kw: store)
+        index = KeywordIndex(tmp_path / "state" / "keyword-index.sqlite3")
+        monkeypatch.setattr(m, "_index", index)
+        monkeypatch.setattr(hybrid, "_index", index)
+        index.upsert_chunks(
+            store.collection_name,
+            [{"source": str(p), "chunk": 0, "name": p.name, "document": p.read_text()} for p in (forgotten, kept)],
+        )
+
+        asyncio.run(m.forget(str(forgotten)))
+
+        found = [hit["metadata"]["source"] for hit in hybrid.keyword_query(store, "zephyrquill", limit=5)]
+        assert found == [str(kept)], "keyword search must lose the forgotten memory, and only that one"
+
     def test_forget_is_registered_as_a_write_tool(self):
         from secondbrain import mcp_server as m
 
