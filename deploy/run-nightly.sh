@@ -8,7 +8,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-uv run sb project-context --no-ingest
+uv run sb project-context --no-ingest --output-dir "$HOME/.claude/artjeck-inbox/project-context"
 uv run sb overnight
 # After ingesting, drop chunks whose source file has gone. `gc` exits 2 when it
 # refuses (an unmounted share, or an implausible share of the corpus missing),
