@@ -3,29 +3,28 @@ from __future__ import annotations
 
 import importlib
 
+from secondbrain import hybrid
+from secondbrain.fakes import FakeStoreFactory
+from secondbrain.keyword_index import KeywordIndex
 from secondbrain.tracing import TraceRecorder
 
 
-def test_ask_records_store_embedding_retrieval_and_generation_spans(monkeypatch):
+def test_ask_records_store_embedding_retrieval_and_generation_spans(monkeypatch, tmp_path):
     ask_module = importlib.import_module("secondbrain.ask")
 
-    class FakeStore:
-        def __init__(self, *args, **kwargs):
-            pass
+    make_store = FakeStoreFactory(
+        count=1,
+        hits=[
+            {
+                "document": "The gateway is on port 4000.",
+                "metadata": {"source": "notes/lab.md", "name": "lab.md"},
+                "distance": 0.1,
+            }
+        ],
+    )
 
-        def count(self):
-            return 1
-
-        def query(self, _embedding, _k):
-            return [
-                {
-                    "document": "The gateway is on port 4000.",
-                    "metadata": {"source": "notes/lab.md", "name": "lab.md"},
-                    "distance": 0.1,
-                }
-            ]
-
-    monkeypatch.setattr(ask_module, "Store", FakeStore)
+    monkeypatch.setattr(ask_module, "Store", make_store)
+    monkeypatch.setattr(hybrid, "_index", KeywordIndex(tmp_path / "keyword-index.sqlite3"))
     monkeypatch.setattr(ask_module, "embed", lambda _texts: [[0.1, 0.2]])
     monkeypatch.setattr(ask_module, "answer", lambda _question, _context: "Port 4000 [1].")
     trace = TraceRecorder("test.answer")

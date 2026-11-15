@@ -19,6 +19,7 @@ import asyncio
 import pytest
 
 from secondbrain.config import cfg, collections_for
+from secondbrain.fakes import FakeStore, FakeStoreFactory
 
 
 @pytest.fixture(autouse=True)
@@ -124,34 +125,29 @@ def test_the_mcp_ask_tool_forwards_its_corpus(monkeypatch):
     assert seen == [[cfg.collection], [cfg.reference_collection]]
 
 
-def test_asking_across_both_corpora_retrieves_from_each(monkeypatch):
+def test_asking_across_both_corpora_retrieves_from_each(monkeypatch, tmp_path):
     """`all` fans out and fuses, rather than silently picking one."""
     import secondbrain.ask as ask_module
+    from secondbrain import hybrid
+    from secondbrain.keyword_index import KeywordIndex
 
-    queried: list[str | None] = []
+    def corpus(collection: str, distance: float) -> FakeStore:
+        hit = {
+            "document": f"doc from {collection}",
+            "metadata": {"source": f"/{collection}/a.md", "chunk": 0},
+            "distance": distance,
+        }
+        return FakeStore(collection, count=3, hits=[hit])
 
-    class FakeStore:
-        def __init__(self, collection=None, **kw):
-            self.collection = collection
-            queried.append(collection)
+    # The reference corpus holds the nearer chunk.
+    make_store = FakeStoreFactory(
+        {cfg.collection: corpus(cfg.collection, 0.5), cfg.reference_collection: corpus(cfg.reference_collection, 0.4)}
+    )
+    queried = make_store.collections
 
-        def count(self):
-            return 3
-
-        def query(self, qvec, k):
-            return [
-                {
-                    "document": f"doc from {self.collection}",
-                    "metadata": {"source": f"/{self.collection}/a.md", "chunk": 0},
-                    "distance": 0.5 if self.collection == cfg.collection else 0.4,
-                }
-            ]
-
-        def documents(self):
-            return []
-
-    monkeypatch.setattr(ask_module, "Store", FakeStore)
+    monkeypatch.setattr(ask_module, "Store", make_store)
     monkeypatch.setattr(ask_module, "embed", lambda texts: [[0.1, 0.2]])
+    monkeypatch.setattr(hybrid, "_index", KeywordIndex(tmp_path / "keyword-index.sqlite3"))
 
     result = ask_module.recall("anything", top_k=5, collection=collections_for("all"))
 
