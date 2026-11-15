@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+from secondbrain.fakes import FakeStoreFactory
+
 
 def _load_seed_module():
     path = Path(__file__).resolve().parents[1] / "scripts" / "seed_public_corpora.py"
@@ -19,27 +21,18 @@ def test_seed_collection_resets_and_ingests_relative_sources(tmp_path, monkeypat
     monkeypatch.setattr(seed.ingest, "_index", KeywordIndex(tmp_path / "keyword-index.sqlite3"))
 
     calls: list[tuple] = []
-
-    class FakeStore:
-        def __init__(self, collection=None):
-            calls.append(("store", collection))
-
-        def reset(self):
-            calls.append(("reset",))
-
-        def count(self):
-            calls.append(("count",))
-            return 1
+    make_store = FakeStoreFactory(count=1)
 
     def fake_ingest_paths(path, collection=None):
         calls.append(("ingest", path, collection))
         yield path, 1
 
-    monkeypatch.setattr(seed, "Store", FakeStore)
+    monkeypatch.setattr(seed, "Store", make_store)
     monkeypatch.setattr(seed, "_safe_repo_path", lambda relative: seed.REPO_ROOT / relative)
     monkeypatch.setattr(seed, "ingest_paths", fake_ingest_paths)
 
     result = seed.seed_collection("second_brain_public", ["README.md"])
+    calls += make_store.stores["second_brain_public"].calls
 
     assert ("reset",) in calls
     assert ("ingest", Path("README.md"), "second_brain_public") in calls
@@ -71,17 +64,7 @@ def test_a_reseed_leaves_no_keyword_rows_from_a_file_dropped_from_the_corpus(tmp
         [{"source": "docs/dropped.md", "chunk": 0, "name": "dropped.md", "document": "zephyrquill: a dropped file"}],
     )
 
-    class FakeStore:
-        def __init__(self, collection=None):
-            pass
-
-        def reset(self):
-            pass
-
-        def count(self):
-            return 0
-
-    monkeypatch.setattr(seed, "Store", FakeStore)
+    monkeypatch.setattr(seed, "Store", FakeStoreFactory())
     monkeypatch.setattr(seed.ingest, "_index", index)
     monkeypatch.setattr(seed, "_safe_repo_path", lambda relative: seed.REPO_ROOT / relative)
     monkeypatch.setattr(seed, "ingest_paths", lambda path, collection=None: iter([]))
