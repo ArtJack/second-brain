@@ -22,37 +22,14 @@ from __future__ import annotations
 
 import pytest
 
-
-class FakeStore:
-    collection_name = "identity_test"
-
-    def __init__(self):
-        self.points: dict[str, dict] = {}
-        self.deleted: list[str] = []
-
-    def upsert(self, ids, embeddings, documents, metadatas):
-        for point_id, document, metadata in zip(ids, documents, metadatas, strict=True):
-            self.points[point_id] = {"document": document, "metadata": metadata}
-
-    def delete_source(self, source):
-        self.deleted.append(source)
-        for point_id in [
-            pid for pid, point in self.points.items() if point["metadata"].get("path") == source
-        ]:
-            del self.points[point_id]
-
-    def count(self):
-        return len(self.points)
-
-    def reset(self):
-        self.points.clear()
+from secondbrain.fakes import FakeStore
 
 
 @pytest.fixture
 def store(monkeypatch):
     from secondbrain import ingest as ingest_mod
 
-    fake = FakeStore()
+    fake = FakeStore("identity_test")
     monkeypatch.setattr(ingest_mod, "Store", lambda *a, **kw: fake)
     monkeypatch.setattr(ingest_mod, "embed", lambda texts: [[0.1] for _ in texts])
     monkeypatch.setattr(ingest_mod._index, "upsert_chunks", lambda *a, **kw: None)
@@ -119,7 +96,7 @@ class TestIdentityIsContent:
 
         list(ingest_paths(note))
 
-        point_id = next(iter(store.points))
+        point_id = next(call[1][0] for call in store.calls if call[0] == "upsert")
         assert point_id.startswith("c:")
         assert len(point_id) == len("c:") + 32
         assert str(tmp_path) not in point_id, "the id must not carry a location"
@@ -147,7 +124,7 @@ class TestPayload:
 
         list(ingest_paths(note))
 
-        meta = next(iter(store.points.values()))["metadata"]
+        meta = store.documents()[0]["metadata"]
         assert meta["path"] == str(note)
         assert meta["source"] == str(note), "kept as an alias so every read site keeps working"
         assert meta["doc_type"] == "md"
@@ -173,7 +150,7 @@ class TestPayload:
 
         list(ingest_paths(note))
 
-        meta = next(iter(store.points.values()))["metadata"]
+        meta = store.documents()[0]["metadata"]
         assert meta["title"] == "scratch"
         assert meta["name"] == "scratch.txt"
         assert meta["doc_type"] == "txt"
@@ -190,7 +167,7 @@ class TestIngestText:
         )
 
         assert chunks == 1
-        meta = next(iter(store.points.values()))["metadata"]
+        meta = store.documents()[0]["metadata"]
         assert meta["path"] == "https://example.com/runbook"
         assert meta["source"] == "https://example.com/runbook"
         assert meta["doc_type"] == "url"
@@ -257,7 +234,7 @@ class TestIdentityIsScopedToItsSource:
         list(ingest_paths(second))
 
         assert store.count() == 2
-        assert {p["metadata"]["path"] for p in store.points.values()} == {str(first), str(second)}
+        assert {p["metadata"]["path"] for p in store.documents()} == {str(first), str(second)}
 
     # test_deleting_one_copy_leaves_the_other_intact moved to test_store_contract.py,
     # where it runs against the shared fake and both real stores.
