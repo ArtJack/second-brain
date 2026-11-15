@@ -1,0 +1,36 @@
+name: structure
+
+# The structure check from "How we build" in AGENTS.md (scripts/check_structure.py).
+# Observe mode: it reports on every pull request and never fails the job. To make it
+# block, remove the final `exit 0`.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Structure check (reports only)
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          base=$(git merge-base "origin/$BASE_REF" HEAD)
+          set +e
+          python3 scripts/check_structure.py --base "$base" --head HEAD > structure.txt
+          code=$?
+          set -e
+          cat structure.txt
+          { echo '```'; cat structure.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" -ne 0 ]; then
+            echo "::warning title=Structure check::exit $code, see the job summary. Observe mode: this does not block."
+          fi
+          exit 0
