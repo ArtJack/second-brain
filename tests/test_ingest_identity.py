@@ -259,22 +259,8 @@ class TestIdentityIsScopedToItsSource:
         assert store.count() == 2
         assert {p["metadata"]["path"] for p in store.points.values()} == {str(first), str(second)}
 
-    def test_deleting_one_copy_leaves_the_other_intact(self, tmp_path, store):
-        """The whole point: a file still on disk keeps its content in the store."""
-        from secondbrain.ingest import ingest_paths
-
-        survivor = tmp_path / "a" / "CLAUDE.md"
-        doomed = tmp_path / "b" / "CLAUDE.md"
-        for path in (survivor, doomed):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("@AGENTS.md\n")
-        list(ingest_paths(survivor))
-        list(ingest_paths(doomed))
-
-        store.delete_source(str(doomed))
-
-        remaining = [p["metadata"]["path"] for p in store.points.values()]
-        assert remaining == [str(survivor)]
+    # test_deleting_one_copy_leaves_the_other_intact moved to test_store_contract.py,
+    # where it runs against the shared fake and both real stores.
 
     def test_re_ingesting_one_file_still_replaces_rather_than_duplicates(self, tmp_path, store):
         from secondbrain.ingest import ingest_paths
