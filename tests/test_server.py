@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from secondbrain import server
+from secondbrain.fakes import FakeStoreFactory
 
 
 @pytest.fixture(autouse=True)
@@ -43,12 +44,7 @@ def test_public_read_endpoints_route_to_public_collection(monkeypatch):
     client, server = _client()
     captured = {}
 
-    class FakeStore:
-        def __init__(self, *args, **kwargs):
-            captured.setdefault("store_collections", []).append(kwargs.get("collection"))
-
-        def count(self):
-            return 7
+    make_store = FakeStoreFactory(count=7)
 
     def fake_ask(question, k=None, collection=None):
         captured["ask"] = {"question": question, "k": k, "collection": collection}
@@ -58,13 +54,15 @@ def test_public_read_endpoints_route_to_public_collection(monkeypatch):
         captured["recall"] = {"query": query, "top_k": top_k, "collection": collection}
         return {"count": 0, "hits": []}
 
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
     monkeypatch.setattr(server, "ask_fn", fake_ask)
     monkeypatch.setattr(server, "recall_fn", fake_recall)
 
     status = client.get("/status", params={"corpus": "public"})
     ask = client.post("/ask", json={"question": "How?", "k": 2, "corpus": "public"})
     recall = client.post("/recall", json={"query": "hybrid", "top_k": 3, "corpus": "public"})
+
+    captured["store_collections"] = make_store.collections
 
     assert status.status_code == 200
     assert status.json()["collection"] == "second_brain_public"
@@ -192,14 +190,9 @@ def test_sse_stream_yields_deltas_and_routes_collection(monkeypatch):
     client, server = _client()
     captured = {}
 
-    class FakeStore:
-        def __init__(self, *args, **kwargs):
-            captured["collection"] = kwargs.get("collection")
+    make_store = FakeStoreFactory(count=1)
 
-        def count(self):
-            return 1
-
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
     monkeypatch.setattr(server, "embed", lambda texts: [[0.1, 0.2]])
     monkeypatch.setattr(
         server,
@@ -216,6 +209,8 @@ def test_sse_stream_yields_deltas_and_routes_collection(monkeypatch):
 
     resp = client.post("/ask/stream", json={"question": "How?", "k": 2, "corpus": "neutral"})
 
+    captured["collection"] = make_store.collections[-1]
+
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
     assert captured["collection"] == "second_brain_neutral"
@@ -229,17 +224,14 @@ def test_health_checks_store_and_embedding(monkeypatch):
     client, server = _client()
     captured = {}
 
-    class FakeStore:
-        def __init__(self, *args, **kwargs):
-            captured["collection"] = kwargs.get("collection")
+    make_store = FakeStoreFactory(count=4)
 
-        def count(self):
-            return 4
-
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
     monkeypatch.setattr(server, "embed", lambda texts: captured.update(embed_texts=texts) or [[0.0]])
 
     resp = client.get("/health")
+
+    captured["collection"] = make_store.collections[-1]
 
     assert resp.status_code == 200
     assert resp.json()["chunks"] == 4
@@ -257,14 +249,9 @@ def test_require_auth_blocks_anonymous_everywhere_but_health(monkeypatch):
     # answers 503 and the last assertion below fails for a reason that has
     # nothing to do with auth. `test_health_checks_store_and_embedding` is where
     # the probe's own behaviour is covered.
-    class FakeStore:
-        def __init__(self, *args, **kwargs):
-            pass
+    make_store = FakeStoreFactory()
 
-        def count(self):
-            return 0
-
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
     monkeypatch.setattr(server, "embed", lambda texts: [[0.0]])
 
     # Anonymous reads are refused outright — the tunnel makes this port
@@ -283,14 +270,9 @@ def test_require_auth_admits_service_read_token(monkeypatch):
     monkeypatch.setenv("SB_WEB_REQUIRE_AUTH", "1")
     monkeypatch.setenv("SB_WEB_READ_TOKEN", "svc-token")
 
-    class FakeStore:
-        def __init__(self, collection=None):
-            self.collection = collection
+    make_store = FakeStoreFactory(count=3)
 
-        def count(self):
-            return 3
-
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
     response = client.get(
         "/status",
         params={"corpus": "public"},
@@ -303,14 +285,9 @@ def test_rate_limit_blocks_after_budget_and_exempts_health(monkeypatch):
     client, server = _client()
     monkeypatch.setenv("SB_WEB_RATE_LIMIT_PER_MIN", "3")
 
-    class FakeStore:
-        def __init__(self, collection=None):
-            self.collection = collection
+    make_store = FakeStoreFactory(count=3)
 
-        def count(self):
-            return 3
-
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
     monkeypatch.setattr(server, "embed", lambda texts: [[0.0]])
 
     for _ in range(3):
@@ -327,14 +304,9 @@ def test_rate_limit_keys_on_cf_connecting_ip(monkeypatch):
     client, server = _client()
     monkeypatch.setenv("SB_WEB_RATE_LIMIT_PER_MIN", "1")
 
-    class FakeStore:
-        def __init__(self, collection=None):
-            self.collection = collection
+    make_store = FakeStoreFactory(count=3)
 
-        def count(self):
-            return 3
-
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
 
     first = client.get(
         "/status", params={"corpus": "public"}, headers={"CF-Connecting-IP": "203.0.113.7"}
@@ -355,14 +327,9 @@ def test_rate_limit_trusts_visitor_ip_only_from_service_token(monkeypatch):
     monkeypatch.setenv("SB_WEB_RATE_LIMIT_PER_MIN", "1")
     monkeypatch.setenv("SB_WEB_READ_TOKEN", "svc-token")
 
-    class FakeStore:
-        def __init__(self, collection=None):
-            self.collection = collection
+    make_store = FakeStoreFactory(count=3)
 
-        def count(self):
-            return 3
-
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
     svc = {"Authorization": "Bearer svc-token"}
 
     # The proxy declares distinct visitors: each gets their own bucket.
@@ -395,14 +362,9 @@ def test_require_auth_off_keeps_anonymous_reads_working(monkeypatch):
     client, server = _client()
     monkeypatch.delenv("SB_WEB_REQUIRE_AUTH", raising=False)
 
-    class FakeStore:
-        def __init__(self, collection=None):
-            self.collection = collection
+    make_store = FakeStoreFactory(count=3)
 
-        def count(self):
-            return 3
-
-    monkeypatch.setattr(server, "Store", FakeStore)
+    monkeypatch.setattr(server, "Store", make_store)
     assert client.get("/status", params={"corpus": "public"}).status_code == 200
 
 

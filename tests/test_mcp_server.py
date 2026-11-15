@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 from secondbrain.citations import grounding
+from secondbrain.fakes import FakeStoreFactory
 
 
 def test_ask_shapes_citations(monkeypatch):
@@ -103,14 +104,7 @@ def test_complete_missing_task_is_false(monkeypatch):
 def test_status_shape_and_no_secrets(monkeypatch):
     from secondbrain import mcp_server as m
 
-    class FakeStore:
-        def __init__(self, *a, **k):
-            pass
-
-        def count(self):
-            return 7
-
-    monkeypatch.setattr(m, "Store", FakeStore)
+    monkeypatch.setattr(m, "Store", FakeStoreFactory(count=7))
     s = asyncio.run(m.status())
     for key in ("store", "backend", "embed_model", "chat_model", "memory_dir", "state_db", "chunks"):
         assert key in s, f"status() missing {key}"
