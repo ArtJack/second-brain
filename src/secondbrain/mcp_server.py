@@ -41,7 +41,7 @@ from .ingest import ingest_paths
 from .keyword_index import KeywordIndex
 from .memory import learn as learn_memory
 from .store import Store
-from .tasks import TaskStore
+from .tasks import MAX_PAGE, STATUSES, TaskStore
 
 # stdout is the protocol channel for stdio transport — never log there.
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -230,14 +230,35 @@ async def forget(memory_file: str) -> dict:
 
 
 @mcp.tool(annotations=_READONLY)
-async def list_tasks(status: str = "open") -> dict:
-    """List tasks tracked in the second brain.
+async def list_tasks(status: str = "open", limit: int = 50, offset: int = 0) -> dict:
+    """List tasks tracked in the second brain, newest first, one page at a time.
+
+    `total` is how many tasks have this status; `showing` is how many this page
+    holds. When `offset + showing` is less than `total`, older tasks exist: call
+    again with `offset` set to `offset + showing`. `count` is the old name for
+    `showing`, not a total.
 
     Args:
         status: Which tasks to return — "open" (default), "done", or "all".
+        limit: Page size, 1 to 200 (default 50).
+        offset: How many of the newest matching tasks to skip (default 0).
     """
-    tasks = await asyncio.to_thread(lambda: TaskStore().list(status=status))
+    if status not in STATUSES:
+        raise ValueError(f"status must be one of {', '.join(STATUSES)}, not {status!r}")
+    if not 1 <= limit <= MAX_PAGE:
+        raise ValueError(f"limit must be between 1 and {MAX_PAGE}, not {limit}")
+    if offset < 0:
+        raise ValueError(f"offset cannot be negative, not {offset}")
+
+    def _read() -> tuple[int, list[dict]]:
+        store = TaskStore()
+        return store.count(status), store.list(status=status, limit=limit, offset=offset)
+
+    total, tasks = await asyncio.to_thread(_read)
     return {
+        "total": total,
+        "showing": len(tasks),
+        "offset": offset,
         "count": len(tasks),
         "tasks": [
             {"id": t["id"], "title": t["title"], "status": t["status"], "created_at": t["created_at"]}
