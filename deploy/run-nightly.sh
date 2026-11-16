@@ -15,5 +15,10 @@ uv run sb overnight
 # which is a decision to report, not a failure that should abort the night.
 uv run sb gc || true
 uv run sb task-sync
-uv run sb health
+# `health` exits 1 when a check fails. Under `set -e` that would skip the
+# briefing, so the night carries on and ends with health's status instead:
+# a failing check shows as the job's exit status rather than vanishing.
+health_status=0
+uv run sb health || health_status=$?
 uv run sb morning
+exit "$health_status"
