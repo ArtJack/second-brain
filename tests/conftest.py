@@ -115,13 +115,14 @@ PINNED_ENV: dict[str, str] = {
     "SB_PROJECT_CONTEXT_OP_TIMEOUT_S": "6",
     # mcp — `_transport_security()` reads host, port and extra hosts when
     # mcp_server is imported, so, like SB_WEB_ALLOWED_ORIGINS below, an ambient
-    # value would change the server object under test. The token is off; a
-    # test that needs one sets it itself.
+    # value would change the server object under test. The token and the
+    # no-token override are off; a test that needs either sets it itself.
     "SB_MCP_TRANSPORT": "stdio",
     "SB_MCP_HOST": "127.0.0.1",
     "SB_MCP_PORT": "8848",
     "SB_MCP_ALLOWED_HOSTS": "",
     "SB_MCP_TOKEN": "",
+    "SB_MCP_ALLOW_NO_TOKEN": "",
     # web — the deployed demo's .env sets REQUIRE_AUTH and a concierge
     # collection, and `tests/test_server.py` has long stripped those in an
     # autouse fixture. That fixture is file-local, so any other module touching

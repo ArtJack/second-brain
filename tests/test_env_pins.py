@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 from pathlib import Path
 
 import dotenv
@@ -36,6 +37,10 @@ SOURCES = sorted([*(ROOT / "src" / "secondbrain").rglob("*.py"), *(ROOT / "scrip
 # `os.environ.get(...)` are matched separately.
 _READ_FUNCTIONS = {"getenv", "_env", "_enabled"}
 _ENVIRON_METHODS = {"get", "setdefault", "pop"}
+# A decision function may take the environment as a mapping (`env.get(...)`),
+# so `.get` on anything counts when the key has a variable's shape. `pop` on a
+# copy of the environment is a write, not a read, and does not count.
+_VARIABLE_SHAPE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
 
 
 def _is_environ(node: ast.expr) -> bool:
@@ -55,14 +60,18 @@ def env_names_read(source: str) -> set[str]:
         if isinstance(node, ast.Subscript) and _is_environ(node.value):
             name = _literal(node.slice)
         elif isinstance(node, ast.Call) and node.args:
-            func = node.func
+            func, first = node.func, _literal(node.args[0])
             if isinstance(func, ast.Name):
                 reads = func.id in _READ_FUNCTIONS
             elif isinstance(func, ast.Attribute):
-                reads = func.attr == "getenv" or (func.attr in _ENVIRON_METHODS and _is_environ(func.value))
+                reads = (
+                    func.attr == "getenv"
+                    or (func.attr in _ENVIRON_METHODS and _is_environ(func.value))
+                    or (func.attr == "get" and first is not None and _VARIABLE_SHAPE.fullmatch(first) is not None)
+                )
             else:
                 reads = False
-            name = _literal(node.args[0]) if reads else None
+            name = first if reads else None
         else:
             name = None
         if name:
@@ -83,9 +92,10 @@ os.environ["A_SUBSCRIPT"]
 environ.get("A_BARE_ENVIRON")
 _env("A_SERVER_ENV", "x")
 _enabled("A_SERVER_FLAG")
-settings.get("NOT_THE_ENVIRONMENT")
-env = os.environ.copy()
-env.pop("NOT_THE_ENVIRONMENT_EITHER", None)
+env.get("A_MAPPING_GET", "")
+settings.get("not_a_variable")
+copied = os.environ.copy()
+copied.pop("A_WRITE_NOT_A_READ", None)
 """
     assert env_names_read(source) == {
         "A_GETENV",
@@ -95,6 +105,7 @@ env.pop("NOT_THE_ENVIRONMENT_EITHER", None)
         "A_BARE_ENVIRON",
         "A_SERVER_ENV",
         "A_SERVER_FLAG",
+        "A_MAPPING_GET",
     }
 
 
