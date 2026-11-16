@@ -13,11 +13,20 @@ workflow's `env:` block. That is why CI was green and a local run was not
 isolated at all: nothing in the repo enforced it, and the failure is silent —
 tests pass either way, they just pass against production.
 
-This module moves that guarantee inside the repo. pytest imports `conftest.py`
-before it collects any test module, and `load_dotenv()` does not override
-variables that already exist, so the values pinned here win over the real
-`.env`. The CI block is now a belt-and-braces duplicate rather than the only
-copy.
+This module moves that guarantee inside the repo, in two layers. pytest imports
+`conftest.py` before it collects any test module, so both are in place before
+`config` runs:
+
+- **`.env` is never read.** `PYTHON_DOTENV_DISABLED=1` is python-dotenv's own
+  off switch, so `load_dotenv()` returns without opening a file. Pins alone
+  were not enough: a variable nobody had pinned still arrived from the owner's
+  `.env`. `SB_LLM_TIMEOUT_S` did, set to 180 there, and a test bounding it at
+  120 failed in every checkout under the owner's, the QA nightly's included,
+  every night from 2026-10-17.
+- **Every variable the code reads is pinned.** That covers what the shell
+  exported as well as any `.env`, and `tests/test_env_pins.py` fails when the
+  code starts reading a variable that is not listed here. The CI block is a
+  belt-and-braces duplicate rather than the only copy.
 
 Two rules keep this working:
 
@@ -28,8 +37,9 @@ Two rules keep this working:
    the exact ambient state this guards against leak back in. A test that wants
    different values sets them per-test, not through the environment.
 
-`tests/test_isolation.py` asserts all of this holds, so a regression here is
-caught by the suite rather than discovered against live infrastructure.
+`tests/test_isolation.py` and `tests/test_env_pins.py` assert all of this holds,
+so a regression here is caught by the suite rather than discovered against live
+infrastructure.
 """
 
 from __future__ import annotations
@@ -66,12 +76,21 @@ atexit.register(shutil.rmtree, SANDBOX, ignore_errors=True)
 # raises inside the import and takes 17 tests with it. It cannot be fixed by a
 # fixture — only by never letting it arrive.
 PINNED_ENV: dict[str, str] = {
+    # python-dotenv (1.2 and later) reads nothing while this is set, so the
+    # owner's `.env` never reaches the suite. test_env_pins.py checks that the
+    # installed version honours it.
+    "PYTHON_DOTENV_DISABLED": "1",
     # storage
     "SB_STORE": "chroma",
     "SB_DATA": str(SANDBOX / "chroma"),
     "SB_MEMORY_DIR": str(SANDBOX / "memory"),
     "SB_STATE_DB": str(SANDBOX / "state.sqlite3"),
     "SB_COLLECTION": "second_brain_tests",
+    "SB_REFERENCE_COLLECTION": "second_brain_reference_tests",
+    # What the MCP `ingest` tool may read. Unset, it is this repository and the
+    # memory directory; pinned, a test that forgets to set its own roots can
+    # read only the throwaway tree.
+    "SB_INGEST_ROOTS": str(SANDBOX),
     # network — unreachable on purpose
     "OPENAI_API_KEY": "test-key",
     "OPENAI_BASE_URL": "http://127.0.0.1:9/v1",
@@ -88,6 +107,21 @@ PINNED_ENV: dict[str, str] = {
     "SB_TOP_K": "5",
     "SB_WEATHER_LOCATION": "",
     "SB_HYBRID": "1",
+    # The owner's `.env` has set 180 since 2026-09-25, and
+    # test_mcp_concurrency.py bounds this at 120. Unpinned, the suite failed
+    # wherever that `.env` applied, and the QA nightly stayed red for weeks.
+    "SB_LLM_TIMEOUT_S": "60",
+    "SB_PROJECT_CONTEXT_BUDGET_S": "20",
+    "SB_PROJECT_CONTEXT_OP_TIMEOUT_S": "6",
+    # mcp — `_transport_security()` reads host, port and extra hosts when
+    # mcp_server is imported, so, like SB_WEB_ALLOWED_ORIGINS below, an ambient
+    # value would change the server object under test. The token is off; a
+    # test that needs one sets it itself.
+    "SB_MCP_TRANSPORT": "stdio",
+    "SB_MCP_HOST": "127.0.0.1",
+    "SB_MCP_PORT": "8848",
+    "SB_MCP_ALLOWED_HOSTS": "",
+    "SB_MCP_TOKEN": "",
     # web — the deployed demo's .env sets REQUIRE_AUTH and a concierge
     # collection, and `tests/test_server.py` has long stripped those in an
     # autouse fixture. That fixture is file-local, so any other module touching
@@ -109,6 +143,8 @@ PINNED_ENV: dict[str, str] = {
     "SB_WEB_RATE_LIMIT_PER_MIN": "0",
     "SB_WEB_HOST": "127.0.0.1",
     "SB_WEB_PORT": "8850",
+    "SB_WEB_SESSION_MAX": "500",
+    "SB_WEB_SESSION_TTL_S": "86400",
 }
 
 os.environ.update(PINNED_ENV)
