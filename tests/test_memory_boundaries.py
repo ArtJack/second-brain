@@ -20,21 +20,7 @@ import asyncio
 
 import pytest
 
-
-class FakeStore:
-    collection_name = "second_brain"
-
-    def __init__(self):
-        self.deleted: list[str] = []
-
-    def delete_source(self, source):
-        self.deleted.append(source)
-
-    def upsert(self, **kw):
-        pass
-
-    def count(self):
-        return 0
+from secondbrain.fakes import FakeStore
 
 
 def test_a_sandbox_memory_does_not_land_beside_the_real_ones(tmp_path, monkeypatch):
@@ -103,7 +89,7 @@ class TestIngestAllowList:
         note.write_text("mine")
         monkeypatch.setattr(m.cfg, "ingest_roots", [str(allowed)])
         monkeypatch.setattr(m, "ingest_paths", lambda *a, **kw: iter([(note, 1)]))
-        monkeypatch.setattr(m, "Store", lambda *a, **kw: FakeStore())
+        monkeypatch.setattr(m, "Store", lambda *a, **kw: FakeStore("second_brain"))
 
         result = asyncio.run(m.ingest(str(note)))
 
@@ -130,7 +116,7 @@ class TestForget:
         monkeypatch.setattr(m.cfg, "memory_dir", tmp_path)
         note = tmp_path / "a-memory.md"
         note.write_text("something the owner no longer wants remembered")
-        store = FakeStore()
+        store = FakeStore("second_brain")
         monkeypatch.setattr(m, "Store", lambda *a, **kw: store)
 
         result = asyncio.run(m.forget(str(note)))
@@ -146,7 +132,7 @@ class TestForget:
         (tmp_path / "memories").mkdir()
         elsewhere = tmp_path / "important.md"
         elsewhere.write_text("not a memory")
-        store = FakeStore()
+        store = FakeStore("second_brain")
         monkeypatch.setattr(m, "Store", lambda *a, **kw: store)
 
         with pytest.raises(ValueError):
@@ -174,7 +160,7 @@ class TestForget:
         forgotten.write_text("zephyrquill: a placeholder the owner asked to forget")
         kept = memories / "another-memory.md"
         kept.write_text("zephyrquill: a placeholder that stays")
-        store = FakeStore()
+        store = FakeStore("second_brain")
         monkeypatch.setattr(m, "Store", lambda *a, **kw: store)
         index = KeywordIndex(tmp_path / "state" / "keyword-index.sqlite3")
         monkeypatch.setattr(m, "_index", index)

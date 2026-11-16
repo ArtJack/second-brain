@@ -1,72 +1,96 @@
 """Hybrid keyword retrieval catches exact sections that semantic search can miss."""
 
+import pytest
+
+from secondbrain import hybrid
+from secondbrain.fakes import FakeStore
 from secondbrain.hybrid import hybrid_retrieve, keyword_query
+from secondbrain.keyword_index import KeywordIndex
+
+# A syllabus section, its table-of-contents entry, the section's next chunk, and
+# a nearby but wrong chunk. Every chunk a query or a neighbour lookup can return
+# is stored, so documents() holds it as a real store would.
+SYLLABUS = [
+    {
+        "id": "toc.md#1",
+        "document": "1.3 Testing Principles FL-1.3.1 Explain the seven testing principles",
+        "metadata": {"source": "toc.md", "chunk": 1},
+    },
+    {
+        "id": "syllabus.md#45",
+        "document": (
+            "1.3. Testing Principles\n"
+            "This syllabus describes seven such principles.\n"
+            "1. Testing shows the presence, not the absence of defects."
+        ),
+        "metadata": {"source": "syllabus.md", "chunk": 45},
+    },
+    {
+        "id": "syllabus.md#46",
+        "document": "2. Exhaustive testing is impossible.",
+        "metadata": {"source": "syllabus.md", "chunk": 46},
+    },
+    {
+        "id": "vector.md#7",
+        "document": "A semantically nearby but wrong chunk.",
+        "metadata": {"source": "vector.md", "chunk": 7},
+    },
+]
 
 
-class FakeStore:
-    def __init__(self):
-        self.vector_hits = [
+def _syllabus_store(vector_hits: list[dict] | None = None) -> FakeStore:
+    """The shared fake holding SYLLABUS, whose vector query answers with the wrong chunk."""
+    if vector_hits is None:
+        vector_hits = [
             {
                 "document": "A semantically nearby but wrong chunk.",
                 "metadata": {"source": "vector.md", "chunk": 7},
                 "distance": 0.25,
             }
         ]
-        self.document_calls = 0
-
-    def query(self, _qvec, _limit):
-        return self.vector_hits
-
-    def documents(self):
-        self.document_calls += 1
-        return [
-            {
-                "document": "1.3 Testing Principles FL-1.3.1 Explain the seven testing principles",
-                "metadata": {"source": "toc.md", "chunk": 1},
-            },
-            {
-                "document": (
-                    "1.3. Testing Principles\n"
-                    "This syllabus describes seven such principles.\n"
-                    "1. Testing shows the presence, not the absence of defects."
-                ),
-                "metadata": {"source": "syllabus.md", "chunk": 45},
-            },
-        ]
-
-    def get_source_chunk(self, source, chunk):
-        if source == "syllabus.md" and chunk == 46:
-            return {
-                "document": "2. Exhaustive testing is impossible.",
-                "metadata": {"source": "syllabus.md", "chunk": 46},
-                "distance": 1.0,
-            }
-        return None
+    return FakeStore("hybrid_test", points=SYLLABUS, hits=vector_hits)
 
 
-def test_keyword_query_prefers_answer_section_over_learning_objective():
-    hits = keyword_query(FakeStore(), "What are the seven testing principles?", limit=1)
+@pytest.fixture
+def own_keyword_index(tmp_path, monkeypatch):
+    """An empty keyword index, so keyword_query scans the store as these tests expect.
+
+    The shared fake has a collection name, as real stores do, so keyword_query
+    reads the index first; the session-wide one holds other tests' rows.
+    """
+    monkeypatch.setattr(hybrid, "_index", KeywordIndex(tmp_path / "keyword-index.sqlite3"))
+
+
+def test_keyword_query_prefers_answer_section_over_learning_objective(own_keyword_index):
+    hits = keyword_query(_syllabus_store(), "What are the seven testing principles?", limit=1)
 
     assert hits[0]["metadata"]["source"] == "syllabus.md"
     assert hits[0]["retrieval"] == "keyword"
 
 
-def test_keyword_query_prefers_numbered_list_for_generic_list_intent():
-    hits = keyword_query(FakeStore(), "list the testing principles", limit=1)
+def test_keyword_query_prefers_numbered_list_for_generic_list_intent(own_keyword_index):
+    hits = keyword_query(_syllabus_store(), "list the testing principles", limit=1)
 
     assert hits[0]["metadata"]["source"] == "syllabus.md"
 
 
 def test_hybrid_retrieve_can_disable_keyword_fusion():
-    store = FakeStore()
+    vector_hits = [
+        {
+            "document": "A semantically nearby but wrong chunk.",
+            "metadata": {"source": "vector.md", "chunk": 7},
+            "distance": 0.25,
+        }
+    ]
+    store = _syllabus_store(vector_hits)
 
     hits = hybrid_retrieve(store, "list the testing principles", [0.1], 1, enabled=False)
 
-    assert hits is store.vector_hits
-    assert store.document_calls == 0
+    assert hits is vector_hits
+    assert store.calls.count(("documents",)) == 0
 
 
-def test_hybrid_retrieve_adds_keyword_hits_and_neighbors():
+def test_hybrid_retrieve_adds_keyword_hits_and_neighbors(own_keyword_index):
     """Keyword hits and their neighbours reach the caller — within the cap.
 
     This asked for limit=1 and asserted three hits came back, which was the
@@ -74,7 +98,7 @@ def test_hybrid_retrieve_adds_keyword_hits_and_neighbors():
     really testing — that a keyword hit and its adjacent chunk both survive
     fusion alongside a vector hit — is asserted here at a limit that fits them.
     """
-    store = FakeStore()
+    store = _syllabus_store()
 
     hits = hybrid_retrieve(store, "list the testing principles", [0.1], 3, enabled=True)
 

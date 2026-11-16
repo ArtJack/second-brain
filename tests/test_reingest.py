@@ -4,6 +4,7 @@ Re-ingesting a file that shrank used to leave its old higher-index chunks behind
 because upsert only overwrites ids it is given. delete_source fixes that, and
 ingest_paths must call it *before* upsert on every (non-reset) ingest.
 """
+from secondbrain.fakes import FakeStore
 from secondbrain.store import ChromaStore
 
 
@@ -49,22 +50,8 @@ def test_ingest_paths_deletes_source_before_upsert(tmp_path, monkeypatch):
     """The pipeline must clear a file's prior chunks before writing new ones."""
     from secondbrain import ingest
 
-    calls: list[tuple] = []
-
-    class FakeStore:
-        def reset(self):
-            calls.append(("reset",))
-
-        def delete_source(self, source):
-            calls.append(("delete_source", source))
-
-        def upsert(self, ids, embeddings, documents, metadatas):
-            calls.append(("upsert", len(ids)))
-
-        def count(self):
-            return 0
-
-    monkeypatch.setattr(ingest, "Store", lambda *a, **k: FakeStore())
+    store = FakeStore()
+    monkeypatch.setattr(ingest, "Store", lambda *a, **k: store)
     monkeypatch.setattr(ingest, "embed", lambda texts: [[0.0] for _ in texts])
 
     note = tmp_path / "note.md"
@@ -72,6 +59,6 @@ def test_ingest_paths_deletes_source_before_upsert(tmp_path, monkeypatch):
 
     list(ingest.ingest_paths(note))
 
-    kinds = [c[0] for c in calls]
+    kinds = [c[0] for c in store.calls]
     assert "delete_source" in kinds and "upsert" in kinds
     assert kinds.index("delete_source") < kinds.index("upsert")

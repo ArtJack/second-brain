@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from secondbrain.fakes import FakeStoreFactory
+
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "split_reference_corpus.py"
 
 
@@ -29,25 +31,9 @@ def script():
     sys.modules.pop("split_reference_corpus", None)
 
 
-class FakeStore:
-    def __init__(self, collection=None, chunks=7):
-        self.collection = collection
-        self.deleted: list[str] = []
-        self._chunks = chunks
-
-    def delete_source(self, source):
-        self.deleted.append(source)
-
-    def count(self):
-        return self._chunks
-
-
 def test_a_moved_source_is_deleted_from_the_keyword_index_too(script, tmp_path, monkeypatch):
-    stores: dict[str, FakeStore] = {}
-
-    def make_store(collection=None, **kw):
-        stores.setdefault(collection, FakeStore(collection))
-        return stores[collection]
+    make_store = FakeStoreFactory(count=7)
+    stores = make_store.stores
 
     index_deletes: list[tuple[str, str]] = []
 
@@ -69,14 +55,15 @@ def test_a_moved_source_is_deleted_from_the_keyword_index_too(script, tmp_path, 
 
 def test_nothing_is_deleted_from_either_copy_when_the_ingest_wrote_nothing(script, tmp_path, monkeypatch):
     """The script's stated safety property, asserted for the index as well."""
-    stores: dict[str, FakeStore] = {}
+    make_store = FakeStoreFactory(count=7)
+    stores = make_store.stores
     index_deletes: list[str] = []
 
     class FakeIndex:
         def delete_source(self, collection, source):
             index_deletes.append(source)
 
-    monkeypatch.setattr(script, "Store", lambda collection=None, **kw: stores.setdefault(collection, FakeStore(collection)))
+    monkeypatch.setattr(script, "Store", make_store)
     monkeypatch.setattr(script, "KeywordIndex", lambda *a, **kw: FakeIndex())
     monkeypatch.setattr(script, "plan", lambda root: {"sources": ["/ref/a.pdf"], "chunks": 3})
     monkeypatch.setattr(script, "ingest_paths", lambda root, collection=None: iter([]))

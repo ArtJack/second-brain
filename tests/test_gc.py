@@ -20,30 +20,32 @@ from __future__ import annotations
 
 import pytest
 
+from secondbrain.fakes import FakeStore
 from secondbrain.gc import GarbageCollectionRefused, collect_garbage
 
 
-class FakeStore:
-    collection_name = "test_collection"
+def _holding(sources, collection: str = "test_collection") -> FakeStore:
+    """The shared fake, holding `sources`.
 
-    def __init__(self, sources) -> None:
-        # A list means "one chunk each", which is all the older tests care
-        # about; a mapping lets a test say how many chunks a source holds.
-        self._sources = sources if isinstance(sources, dict) else {s: 1 for s in sources}
-        self.deleted: list[str] = []
-
-    def sources(self) -> dict[str, int]:
-        return dict(self._sources)
-
-    def delete_source(self, source: str) -> None:
-        self.deleted.append(source)
+    A list means "one chunk each", which is all the older tests care about; a
+    mapping lets a test say how many chunks a source holds.
+    """
+    counts = sources if isinstance(sources, dict) else {source: 1 for source in sources}
+    return FakeStore(
+        collection,
+        points=[
+            {"id": f"{source}#{chunk}", "document": "", "metadata": {"source": source, "chunk": chunk}}
+            for source, chunks in counts.items()
+            for chunk in range(chunks)
+        ],
+    )
 
 
 def test_a_source_whose_file_is_gone_is_removed(tmp_path):
     present = tmp_path / "kept.md"
     present.write_text("still here")
     gone = tmp_path / "deleted.md"
-    store = FakeStore([str(present), str(gone)])
+    store = _holding([str(present), str(gone)])
 
     result = collect_garbage(store=store)
 
@@ -55,7 +57,7 @@ def test_a_source_whose_file_is_gone_is_removed(tmp_path):
 def test_dry_run_reports_without_deleting(tmp_path):
     present = tmp_path / "kept.md"
     present.write_text("still here")
-    store = FakeStore([str(present), str(tmp_path / "deleted.md")])
+    store = _holding([str(present), str(tmp_path / "deleted.md")])
 
     result = collect_garbage(store=store, dry_run=True)
 
@@ -69,7 +71,7 @@ def test_an_unmounted_volume_aborts_instead_of_counting_as_missing(tmp_path):
     present = tmp_path / "kept.md"
     present.write_text("still here")
     on_the_share = "/Volumes/NotMountedRightNow/AI/artjeck/memory/a-memory.md"
-    store = FakeStore([str(present), on_the_share])
+    store = _holding([str(present), on_the_share])
 
     with pytest.raises(GarbageCollectionRefused) as excinfo:
         collect_garbage(store=store)
@@ -81,7 +83,7 @@ def test_an_unmounted_volume_aborts_instead_of_counting_as_missing(tmp_path):
 def test_a_relative_source_is_never_deleted(tmp_path):
     present = tmp_path / "kept.md"
     present.write_text("still here")
-    store = FakeStore([str(present), "examples/lab-notes.md"])
+    store = _holding([str(present), "examples/lab-notes.md"])
 
     result = collect_garbage(store=store)
 
@@ -92,7 +94,7 @@ def test_a_relative_source_is_never_deleted(tmp_path):
 def test_removing_most_of_the_collection_aborts_unless_forced(tmp_path):
     present = tmp_path / "kept.md"
     present.write_text("still here")
-    store = FakeStore([str(present)] + [str(tmp_path / f"gone-{i}.md") for i in range(9)])
+    store = _holding([str(present)] + [str(tmp_path / f"gone-{i}.md") for i in range(9)])
 
     with pytest.raises(GarbageCollectionRefused) as excinfo:
         collect_garbage(store=store)
@@ -107,7 +109,7 @@ def test_removing_most_of_the_collection_aborts_unless_forced(tmp_path):
 
 
 def test_an_empty_collection_is_not_an_error():
-    store = FakeStore([])
+    store = _holding([])
 
     result = collect_garbage(store=store)
 
@@ -176,7 +178,7 @@ def test_a_mount_point_that_exists_but_is_not_mounted_aborts(tmp_path, monkeypat
     stale_mount.mkdir(parents=True)
     monkeypatch.setattr(gc_module, "_VOLUME_PARENTS", (str(tmp_path / "Volumes"),))
 
-    store = FakeStore([str(present), str(stale_mount / "artjeck" / "memory" / "a-memory.md")])
+    store = _holding([str(present), str(stale_mount / "artjeck" / "memory" / "a-memory.md")])
 
     with pytest.raises(GarbageCollectionRefused) as excinfo:
         collect_garbage(store=store)
@@ -196,7 +198,7 @@ def test_a_genuinely_mounted_volume_does_not_block_the_sweep(tmp_path, monkeypat
 
     gone = tmp_path / "Volumes" / "DISK" / "deleted-note.md"
     gone.parent.mkdir(parents=True)
-    store = FakeStore([str(present), str(gone)])
+    store = _holding([str(present), str(gone)])
 
     result = collect_garbage(store=store)
 
@@ -212,8 +214,7 @@ def test_gc_removes_the_keyword_rows_too(tmp_path, monkeypatch):
     present = tmp_path / "kept.md"
     present.write_text("still here")
     gone = tmp_path / "deleted.md"
-    store = FakeStore([str(present), str(gone)])
-    store.collection_name = "c"
+    store = _holding([str(present), str(gone)], collection="c")
 
     dropped: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -251,7 +252,7 @@ class TestRulesAreRetroactive:
         secret = tmp_path / "aws-secrets.md"
         for path in (keep, secret):
             path.write_text("x")
-        store = FakeStore({str(keep): 3, str(secret): 2})
+        store = _holding({str(keep): 3, str(secret): 2})
 
         res = gc_mod.collect_garbage(store=store, dry_run=True, rules=self._rules(tmp_path))
 
@@ -266,7 +267,7 @@ class TestRulesAreRetroactive:
         secret.write_text("x")
         keep = tmp_path / "notes.md"
         keep.write_text("x")
-        store = FakeStore({str(keep): 3, str(secret): 2})
+        store = _holding({str(keep): 3, str(secret): 2})
 
         res = gc_mod.collect_garbage(store=store, rules=self._rules(tmp_path))
 
@@ -281,7 +282,7 @@ class TestRulesAreRetroactive:
         keepers = [tmp_path / f"notes{i}.md" for i in range(5)]
         for path in (secret, lock, *keepers):
             path.write_text("x")
-        store = FakeStore({str(secret): 2, str(lock): 90, **{str(k): 3 for k in keepers}})
+        store = _holding({str(secret): 2, str(lock): 90, **{str(k): 3 for k in keepers}})
         index_deletes: list[str] = []
         monkeypatch.setattr(
             gc_mod._index, "delete_source", lambda collection, source: index_deletes.append(source)
@@ -302,7 +303,7 @@ class TestRulesAreRetroactive:
         buried.write_text("x")
         keep = tmp_path / "app" / "readme.md"
         keep.write_text("x")
-        store = FakeStore({str(keep): 1, str(buried): 4})
+        store = _holding({str(keep): 1, str(buried): 4})
 
         res = gc_mod.collect_garbage(store=store, rules=self._rules(tmp_path), enforce_rules=True)
 
@@ -315,7 +316,7 @@ class TestRulesAreRetroactive:
         monkeypatch.setattr(gc_mod, "_load_scan_rules", dict)
         secret = tmp_path / "aws-secrets.md"
         secret.write_text("x")
-        store = FakeStore({str(secret): 2})
+        store = _holding({str(secret): 2})
 
         res = gc_mod.collect_garbage(store=store, enforce_rules=True)
 
@@ -335,7 +336,7 @@ class TestRulesAreRetroactive:
             path = tmp_path / f"note{i}.md"
             path.write_text("x")
             sources[str(path)] = 1
-        store = FakeStore(sources)
+        store = _holding(sources)
 
         with pytest.raises(gc_mod.GarbageCollectionRefused) as excinfo:
             gc_mod.collect_garbage(store=store, rules={"exclude_globs": ["*.md"]}, enforce_rules=True)
@@ -361,7 +362,7 @@ class TestRulesAreRetroactive:
         keepers = [tmp_path / f"here{i}.md" for i in range(3)]
         for path in keepers:
             path.write_text("x")
-        store = FakeStore({str(gone): 2, **{str(k): 1 for k in keepers}})
+        store = _holding({str(gone): 2, **{str(k): 1 for k in keepers}})
 
         res = gc_mod.collect_garbage(store=store)
 
@@ -378,7 +379,7 @@ class TestRulesAreRetroactive:
         keepers = [tmp_path / f"here{i}.md" for i in range(3)]
         for path in keepers:
             path.write_text("x")
-        store = FakeStore({str(k): 1 for k in keepers})
+        store = _holding({str(k): 1 for k in keepers})
 
         with pytest.raises(gc_mod.GarbageCollectionRefused):
             gc_mod.collect_garbage(store=store, enforce_rules=True)
@@ -417,7 +418,7 @@ class TestVerdictFoundTheseAfterTheFirstAttempt:
         secret = tmp_path / "aws-secrets.md"
         secret.write_text("x")
         sources[str(secret)] = 4
-        store = FakeStore(sources)
+        store = _holding(sources)
 
         res = gc_mod.collect_garbage(store=store)
 
@@ -446,7 +447,7 @@ class TestVerdictFoundTheseAfterTheFirstAttempt:
         from secondbrain import gc as gc_mod
 
         monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: None)
-        store = FakeStore(self._corpus(tmp_path))
+        store = _holding(self._corpus(tmp_path))
 
         with pytest.raises(gc_mod.GarbageCollectionRefused) as excinfo:
             gc_mod.collect_garbage(store=store, enforce_rules=True)
@@ -461,7 +462,7 @@ class TestVerdictFoundTheseAfterTheFirstAttempt:
         monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: None)
         sources = self._corpus(tmp_path)
         sources[str(tmp_path / "gone.md")] = 2
-        store = FakeStore(sources)
+        store = _holding(sources)
 
         res = gc_mod.collect_garbage(store=store)
 
@@ -484,7 +485,7 @@ class TestVerdictFoundTheseAfterTheFirstAttempt:
             lock.write_text("x")
             sources[str(lock)] = 1
         sources[str(tmp_path / "gone.md")] = 1
-        store = FakeStore(sources)
+        store = _holding(sources)
 
         res = gc_mod.collect_garbage(store=store)
 
@@ -500,7 +501,7 @@ class TestVerdictFoundTheseAfterTheFirstAttempt:
 
         for broken in ({"exclude_globs": None}, {"exclude_dirs": 42}, {"exclude_globs": [None, 7]}):
             monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda broken=broken: broken)
-            store = FakeStore(dict(sources))
+            store = _holding(dict(sources))
 
             res = gc_mod.collect_garbage(store=store)
 
@@ -516,7 +517,7 @@ class TestVerdictFoundTheseAfterTheFirstAttempt:
         from secondbrain import gc as gc_mod
 
         monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: {"exclude_globs": ["*.md"]})
-        store = FakeStore(self._corpus(tmp_path))
+        store = _holding(self._corpus(tmp_path))
 
         with pytest.raises(gc_mod.GarbageCollectionRefused) as excinfo:
             gc_mod.collect_garbage(store=store, enforce_rules=True)
@@ -550,7 +551,7 @@ class TestRunSixMinors:
             raise OSError("nope")
 
         monkeypatch.setattr(gc_mod, "_load_scan_rules", unreadable)
-        store = FakeStore(self._corpus(tmp_path))
+        store = _holding(self._corpus(tmp_path))
 
         res = gc_mod.collect_garbage(store=store)
 
@@ -561,7 +562,7 @@ class TestRunSixMinors:
         from secondbrain import gc as gc_mod
 
         monkeypatch.setattr(gc_mod, "_load_scan_rules", lambda: {"exclude_globs": ["*.lock"]})
-        store = FakeStore(self._corpus(tmp_path))
+        store = _holding(self._corpus(tmp_path))
 
         assert gc_mod.collect_garbage(store=store)["rules_loaded"] is True
 
@@ -585,7 +586,7 @@ class TestRunSixMinors:
             sources[str(present)] = 1
         (tmp_path / "kept.md").write_text("x")
         sources[str(tmp_path / "kept.md")] = 1
-        store = FakeStore(sources)
+        store = _holding(sources)
 
         with pytest.raises(gc_mod.GarbageCollectionRefused) as excinfo:
             gc_mod.collect_garbage(store=store, enforce_rules=True)

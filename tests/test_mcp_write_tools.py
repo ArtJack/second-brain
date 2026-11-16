@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from secondbrain.fakes import FakeStoreFactory
+
 
 def test_ingest_reports_file_and_chunk_counts(monkeypatch, tmp_path: Path) -> None:
     """The counts a caller sees are summed across every file, not per file."""
@@ -37,12 +39,8 @@ def test_ingest_reports_file_and_chunk_counts(monkeypatch, tmp_path: Path) -> No
         yield ("a.md", 3)
         yield ("b.md", 4)
 
-    class FakeStore:
-        def count(self):
-            return 99
-
     monkeypatch.setattr(m, "ingest_paths", fake_ingest_paths)
-    monkeypatch.setattr(m, "Store", FakeStore)
+    monkeypatch.setattr(m, "Store", FakeStoreFactory(count=99))
 
     result = asyncio.run(m.ingest(str(target)))
 
