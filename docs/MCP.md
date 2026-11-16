@@ -16,7 +16,7 @@ models called are the ones the engine already uses.
 | `recall(query, top_k=0)` | free (embed only) | Raw matching chunks, **no chat model** — cheapest grounding. |
 | `ingest(path)` | free (embed) | Chunk + embed + store a file or folder. |
 | `learn(fact)` | free (embed) | Save a durable Markdown memory and ingest it. |
-| `list_tasks(status="open")` | free | List tasks (`open` / `done` / `all`). |
+| `list_tasks(status="open", limit=50, offset=0)` | free | List tasks (`open` / `done` / `all`), newest first, a page at a time. Returns `total` (every task with that status) and `showing` (this page); page on with `offset`. |
 | `add_task(text)` | free | Add a task. |
 | `complete_task(task_id)` | free | Mark a task done. |
 | `status()` | free | Backend, models, store, chunk count (no secrets). |
