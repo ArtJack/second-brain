@@ -158,7 +158,8 @@ def task_add_node(state: AgentState) -> AgentState:
 
 def task_list_node(state: AgentState) -> AgentState:
     status = state.get("argument") or "open"
-    tasks = TaskStore().list(status=status)
+    store = TaskStore()
+    tasks = store.list(status=status)
     if not tasks:
         label = "tasks" if status == "all" else f"{status} tasks"
         return {**state, "answer": f"No {label}."}
@@ -166,6 +167,9 @@ def task_list_node(state: AgentState) -> AgentState:
     for task in tasks:
         label = "DONE" if task["status"] == "done" else "OPEN"
         lines.append(f"{label} #{task['id']} {task['title']}")
+    total = store.count(status)
+    if total > len(tasks):
+        lines.append(f"Showing the newest {len(tasks)} of {total}.")
     return {**state, "answer": "\n".join(lines)}
 
 
@@ -185,7 +189,7 @@ def status_node(state: AgentState) -> AgentState:
         chunks = str(Store().count())
     except RuntimeError as exc:
         chunks = f"ERROR: {exc}"
-    open_tasks = len(TaskStore().list(status="open"))
+    open_tasks = TaskStore().count("open")
     answer = f"chunks: {chunks}\nopen tasks: {open_tasks}"
     return {**state, "answer": answer}
 

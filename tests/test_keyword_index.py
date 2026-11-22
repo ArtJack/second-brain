@@ -493,3 +493,181 @@ def test_querying_an_old_schema_index_answers_instead_of_raising(tmp_path):
 
     assert [hit["metadata"]["source"] for hit in hits] == ["/a.md"]
     assert hits[0]["metadata"]["header"] == ""
+
+
+def _findings(index):
+    index.upsert_chunks(
+        "c",
+        _rows(
+            ("/notes/names-it.md", 0, "Example: QQ-F-42 names a placeholder."),
+            ("/notes/example-a.md", 0, "Example: a sample gadget is described in this note."),
+            ("/notes/example-b.md", 0, "Example: someone asked which sample gadget this note describes."),
+            ("/notes/example-c.md", 0, "Example: the gadget described here is a sample gadget."),
+            ("/notes/example-d.md", 0, "Example: ZZ-F-42 describes a sample gadget."),
+            ("/notes/loose.md", 0, "Placeholder text with qq, f and 42 kept apart."),
+        ),
+    )
+
+
+def test_an_identifier_finds_the_chunk_that_names_it(index):
+    """Production, 2026-09-12: a question that named an identifier got NOT_IN_SOURCES.
+
+    Every part of the identifier is two characters or shorter, so the length filter
+    dropped them all, and the question searched only its common words, which matched
+    hundreds of chunks and left the few containing the identifier out of the top
+    twenty.
+    """
+    _findings(index)
+
+    hits = index.query("c", "Which sample gadget does QQ-F-42 describe?", limit=10)
+
+    assert hits and hits[0]["metadata"]["source"] == "/notes/names-it.md"
+
+
+def test_an_identifier_matches_as_written_rather_than_as_loose_parts(index):
+    """An identifier is searched as one quoted phrase: its tokens adjacent and in order.
+
+    Its parts on their own are among the commonest tokens there are. Searched as
+    loose parts, notes that merely contain those tokens match as well, and in
+    production such chunks outranked the ones naming the identifier. Keeping only
+    the number is no better: `42` is in three of these notes.
+    """
+    _findings(index)
+
+    hits = index.query("c", "QQ-F-42", limit=10)
+
+    assert [hit["metadata"]["source"] for hit in hits] == ["/notes/names-it.md"]
+
+
+def test_a_pr_or_port_number_keeps_its_number(index):
+    """A number shorter than three characters used to be dropped along with "is" and "of".
+
+    A question about a pull request by number searched for "change" alone and found
+    nothing, and "port 9" lost its 9, so a shorter note about another port ranked
+    first.
+    """
+    from secondbrain.keyword_index import query_terms
+
+    index.upsert_chunks(
+        "c",
+        _rows(
+            ("/notes/pr-98.md", 0, "Example PR #98 in a sample repository renames a placeholder."),
+            ("/notes/pr-97.md", 0, "Example PR #97 in a sample repository adds a placeholder."),
+            ("/notes/dead-port.md", 0, "Tests point the gateway at port 9, where nothing listens."),
+            ("/notes/example-port.md", 0, "An example service listens on port 6333."),
+        ),
+    )
+
+    pr = index.query("c", "What did PR #98 change?", limit=10)
+    port = index.query("c", "what listens on port 9", limit=10)
+
+    assert "98" in query_terms("What did PR #98 change?")
+    assert "9" in query_terms("what listens on port 9")
+    assert pr and pr[0]["metadata"]["source"] == "/notes/pr-98.md"
+    assert port and port[0]["metadata"]["source"] == "/notes/dead-port.md"
+
+
+# Deliberately synthetic: tests are ingested into the live brain, and a fixture
+# that reads like a note gets cited as one.
+_PLAIN = (
+    ("/right.md", 0, "Example invoice format: a placeholder layout with one sample line per item."),
+    ("/noise.md", 0, "What is the thing that is in the place with the other things?"),
+    ("/write-up.md", 0, "Example write-up: re-ingest the vector-only sample notes."),
+    ("/notes.md", 0, "Example notes on ingest: vector search only, sample notes first."),
+    ("/off.md", 0, "Example: is it on? It is off."),
+    ("/on-call.md", 0, "Example on call: it is on you, and it is on me."),
+    ("/eg.md", 0, "E.g. the example gateway's job is routing."),
+    ("/gateway.md", 0, "An example gateway job queue holds every example gateway job."),
+)
+
+
+@pytest.mark.parametrize(
+    ("question", "terms", "ranked"),
+    [
+        ("what is my invoice format", ["invoice", "format"], ["/right.md"]),
+        ("What is the write-up for it?", ["write"], ["/write-up.md"]),
+        (
+            "How do I re-ingest the vector-only notes?",
+            ["ingest", "vector", "only", "notes"],
+            ["/notes.md", "/write-up.md"],
+        ),
+        ("Is it on or is it off?", ["off"], ["/off.md"]),
+        ("e.g. what is the gateway's job?", ["gateway", "job"], ["/gateway.md", "/eg.md"]),
+        ("what is the", ["what", "is", "the"], ["/noise.md", "/eg.md", "/write-up.md", "/off.md", "/on-call.md"]),
+    ],
+)
+def test_a_question_without_identifiers_ranks_exactly_as_it_did_before(index, question, terms, ranked):
+    """Keeping identifiers must not reopen the regression the stopword filter closed.
+
+    Terms and rankings are pinned from the code before identifiers were kept. The
+    questions carry short words, hyphenated words and a dotted abbreviation, and no
+    digit. Keeping short words would add `/on-call.md` to "Is it on or is it off?";
+    making `re-ingest` and `vector-only` phrases would lift `/write-up.md` above
+    `/notes.md`.
+    """
+    from secondbrain.keyword_index import query_terms
+
+    index.upsert_chunks("c", _rows(*_PLAIN))
+
+    assert query_terms(question) == terms
+    assert [hit["metadata"]["source"] for hit in index.query("c", question, limit=10)] == ranked
+
+
+def test_identifier_punctuation_reaches_match_only_inside_quotes(index):
+    """An identifier brings `-`, `.` and `:` into the match expression, where unquoted they are query syntax."""
+    index.upsert_chunks("c", _rows(("/a.md", 0, "An example service listens on 198.51.100.7:8081 since 1999-01-02.")))
+
+    assert [hit["metadata"]["source"] for hit in index.query("c", "198.51.100.7:8081", limit=5)] == ["/a.md"]
+    assert [hit["metadata"]["source"] for hit in index.query("c", "1999-01-02", limit=5)] == ["/a.md"]
+    assert index.query("c", 'header:42 OR "QQ-F-42 NEAR(1.2', limit=5) == []
+
+
+def test_a_short_word_beside_a_number_is_still_searched_when_nothing_else_is(index):
+    """SB-F-57: keeping a lone number switched the all-words fallback off.
+
+    Before identifiers were kept, a question whose words are all short fell back to
+    searching every one of them. Keeping the number made the term list non-empty,
+    which dropped `pr`, and a note holding only the number outranked the one naming
+    both. Stopwords and the pieces of a joined identifier still stay out, and so,
+    since SB-F-60, do single letters such as the `s` of "what's", which pulled
+    unrelated notes into the keyword results.
+    """
+    from secondbrain.keyword_index import query_terms
+
+    index.upsert_chunks(
+        "c",
+        _rows(
+            ("/notes/pr-96.md", 0, "Example PR 96 merged a sample change."),
+            ("/notes/count.md", 0, "96 sample items."),
+        ),
+    )
+
+    ranked = [hit["metadata"]["source"] for hit in index.query("c", "PR 96", limit=5)]
+
+    assert query_terms("PR 96") == ["pr", "96"]
+    assert query_terms("Go 1.22") == ["go", "1.22"]
+    assert query_terms("What is QQ-F-43?") == ["qq-f-43"]
+    assert query_terms("What's QQ-F-43?") == ["qq-f-43"]
+    assert ranked == ["/notes/pr-96.md", "/notes/count.md"]
+
+
+@pytest.mark.parametrize(
+    ("question", "terms"),
+    [
+        # `/` separates two identifiers rather than joining one.
+        ("QQ-F-42/43", ["qq-f-42", "43"]),
+        # `:` joins, as `-` and `.` do.
+        ("192.0.2.7:9", ["192", "192.0.2.7:9"]),
+        # A span the length filter already kept is not added a second time.
+        ("port 8765", ["port", "8765"]),
+        # Identifiers come from the lowered text, like every other term.
+        ("Port ABC123", ["port", "abc123"]),
+        # Every identifier is kept, not only the first.
+        ("compare QQ-F-42 and QQ-F-43", ["compare", "qq-f-42", "qq-f-43"]),
+    ],
+)
+def test_the_identifier_rule_keeps_its_edge_decisions(question, terms):
+    """SB-F-58: each case is a plausible wrong rule the other tests let through."""
+    from secondbrain.keyword_index import query_terms
+
+    assert query_terms(question) == terms
