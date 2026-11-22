@@ -92,8 +92,15 @@ TASK_SOURCE_SUFFIXES = {".md", ".markdown", ".txt", ".rst"}
 
 # An explicit marker is the owner writing down work. These become durable tasks.
 TASK_PATTERNS = [
-    re.compile(r"^\s*(?:[-*]\s*)?\[\s\]\s+(.{3,220})$"),
     re.compile(r"^\s*(?:TODO|FIXME|ACTION|FOLLOW[ -]?UP)\s*:?\s+(.{3,220})$", re.IGNORECASE),
+]
+
+# An unchecked box is a line in somebody's checklist. The scan walks other
+# repositories read-only, and their QA reports, plans and templates are mostly
+# checklists: "[ ] venv/bin/pytest passes" is an acceptance criterion someone
+# else is tracking, not work this owner took on. Reported, never synced.
+CHECKLIST_PATTERNS = [
+    re.compile(r"^\s*(?:[-*]\s*)?\[\s\]\s+(.{3,220})$"),
 ]
 
 # Prose that merely sounds like work. "You need to install Node 20 first" in a
@@ -440,6 +447,11 @@ def extract_tasks(text: str, limit: int = 12) -> list[str]:
     return _extract(text, TASK_PATTERNS, limit)
 
 
+def extract_checklist(text: str, limit: int = 12) -> list[str]:
+    """Unchecked boxes from someone's checklist. Reported for a human, never synced."""
+    return _extract(text, CHECKLIST_PATTERNS, limit)
+
+
 def extract_mentions(text: str, limit: int = 12) -> list[str]:
     """Sentences that sound like work. Reported for a human to read, never synced."""
     return _extract(text, MENTION_PATTERNS, limit)
@@ -491,6 +503,7 @@ def run_overnight(*, root: Path | None = None, dry_run: bool = False) -> dict[st
             text = read_file(path)
             is_prose = path.suffix.lower() in TASK_SOURCE_SUFFIXES
             tasks = extract_tasks(text) if is_prose else []
+            checklist = extract_checklist(text) if is_prose else []
             mentions = extract_mentions(text) if is_prose else []
             chunks = 0 if dry_run else _ingest_one(path, scan.collection_for(path))
             if not dry_run:
@@ -502,6 +515,7 @@ def run_overnight(*, root: Path | None = None, dry_run: bool = False) -> dict[st
                     "size": stat.st_size,
                     "chunks": chunks,
                     "tasks": tasks,
+                    "checklist": checklist,
                     "mentions": mentions,
                     "collection": scan.collection_for(path),
                     "snippet": _snippet(text),
@@ -589,9 +603,14 @@ def write_report(
             for task in item["tasks"]:
                 lines.append(f"- {task}")
             lines.append("")
+        # Separate headings, because `task-sync` reads "Possible tasks:" and only
+        # that. These are for a human to read and act on or ignore.
+        if item.get("checklist"):
+            lines.append("Checklist items (not tasks):")
+            for entry in item["checklist"]:
+                lines.append(f"- {entry}")
+            lines.append("")
         if item.get("mentions"):
-            # A separate heading, because `task-sync` reads "Possible tasks:"
-            # and only that. These are for a human to read and act on or ignore.
             lines.append("Mentions (not tasks):")
             for mention in item["mentions"]:
                 lines.append(f"- {mention}")

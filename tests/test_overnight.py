@@ -11,7 +11,8 @@ from secondbrain.overnight import (
 
 
 def test_extract_tasks_finds_common_markers():
-    """Explicit markers only. Prose is a mention — see tests/test_task_extraction.py."""
+    """Explicit markers only. Prose is a mention and an unchecked box is a
+    checklist item — see tests/test_task_extraction.py."""
     text = """
     TODO: renew the server certificate
     - [ ] Review the new lease document
@@ -22,7 +23,7 @@ def test_extract_tasks_finds_common_markers():
     tasks = extract_tasks(text)
 
     assert "renew the server certificate" in tasks
-    assert "Review the new lease document" in tasks
+    assert "Review the new lease document" not in tasks
     assert "follow up with Alex about the Qdrant key" not in tasks
     assert "Already finished" not in tasks
 
