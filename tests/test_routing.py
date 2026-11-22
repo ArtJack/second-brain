@@ -13,7 +13,7 @@ from secondbrain.agent import _route_text, run_turn
         ("/status", ("status", "")),
         ("/tasks", ("task_list", "open")),
         ("/tasks all", ("task_list", "all")),
-        ("/learn I prefer PDF invoices", ("learn", "I prefer PDF invoices")),
+        ("/learn I prefer fixture-token BETA", ("learn", "I prefer fixture-token BETA")),
         ("remember the gateway port is 4000", ("learn", "the gateway port is 4000")),
         ("/ingest ~/notes", ("ingest", "~/notes")),
         ("/task", ("task_add", "")),
