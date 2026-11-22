@@ -203,3 +203,71 @@ class TestProductionWiringCarriesTheSignal:
         assert "event: done" in resp.text
         assert "citations_present" in resp.text, "the stream's done event carries no grounding signal"
         assert '"citations_present": false' in resp.text.replace("'", '"')
+
+
+class TestTheReaderIsWarnedAboutAnUncitedAnswer:
+    """SB-F-2: the signal was emitted for 14 days and no client ever showed it.
+
+    The owner's decision (2026-09-14) is to warn, except on a declared refusal.
+    `grounding()` already draws that line with the refusal marker, so the work is
+    carrying its verdict to the two readers: an MCP client and the web UI.
+    """
+
+    def _ask_returning(self, monkeypatch, answer: str, grounding: dict):
+        from secondbrain import mcp_server as m
+
+        monkeypatch.setattr(
+            m,
+            "ask_fn",
+            lambda *a, **kw: {
+                "answer": answer,
+                "sources": [{"n": 1, "source": "/notes/a.md", "distance": 0.1}],
+                "invalid_citations": [],
+                "grounding": grounding,
+            },
+        )
+        return m
+
+    def test_an_uncited_answer_reaches_the_client_flagged(self, monkeypatch) -> None:
+        import asyncio
+
+        m = self._ask_returning(
+            monkeypatch,
+            "Your sample deadline is the third.",
+            {"citations_present": False, "sources_retrieved": 1, "refused": False, "unsupported": True},
+        )
+
+        out = asyncio.run(m.ask("when is the sample deadline?"))
+
+        assert out["unsupported"] is True
+        assert out["citations_present"] is False
+
+    def test_a_declared_refusal_carries_no_flag(self, monkeypatch) -> None:
+        """An honest refusal must not look like an ungrounded claim."""
+        import asyncio
+
+        from secondbrain.citations import REFUSAL_MARKER
+
+        m = self._ask_returning(
+            monkeypatch,
+            f"{REFUSAL_MARKER} the notes do not cover that.",
+            {"citations_present": False, "sources_retrieved": 1, "refused": True, "unsupported": False},
+        )
+
+        out = asyncio.run(m.ask("when is the sample deadline?"))
+
+        assert out["unsupported"] is False
+
+    def test_a_missing_verdict_raises_instead_of_publishing_a_null(self, monkeypatch) -> None:
+        import asyncio
+
+        import pytest as _pytest
+
+        m = self._ask_returning(
+            monkeypatch,
+            "An answer.",
+            {"citations_present": False, "sources_retrieved": 1, "refused": False},
+        )
+
+        with _pytest.raises(KeyError):
+            asyncio.run(m.ask("when is the sample deadline?"))

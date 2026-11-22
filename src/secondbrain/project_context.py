@@ -53,6 +53,7 @@ class ProjectContext:
     commands: list[str]
     follow_ups: list[str]
     excerpts: dict[str, str] = field(default_factory=dict)
+    checklist: list[str] = field(default_factory=list)
 
 
 class _Deadline:
@@ -269,6 +270,7 @@ def _build_context(root: Path) -> ProjectContext:
         sources=sources,
         commands=_commands(root),
         follow_ups=_follow_ups(sources),
+        checklist=_checklist(sources),
         # Read excerpts here, inside the guarded build, so rendering touches no
         # filesystem and the whole run stays bounded.
         excerpts={str(source): _excerpt(source) for source in sources},
@@ -331,8 +333,14 @@ def render_active_projects_index(contexts: list[ProjectContext]) -> str:
     lines.extend(["", "## Explicit Follow-Ups Across Projects", ""])
     follow_ups = [(context.name, item) for context in contexts for item in context.follow_ups]
     if not follow_ups:
-        lines.append("No explicit TODO/checklist/follow-up markers found in project docs.")
+        lines.append("No explicit TODO/FIXME/ACTION/follow-up markers found in project docs.")
     for name, item in follow_ups:
+        lines.append(f"- {name}: {item}")
+    lines.extend(["", "## Checklist Items Across Projects (not tasks)", ""])
+    checklist = [(context.name, item) for context in contexts for item in context.checklist]
+    if not checklist:
+        lines.append("No unchecked checklist boxes found in project docs.")
+    for name, item in checklist:
         lines.append(f"- {name}: {item}")
     lines.extend(["", "## Source Notes", ""])
     for context in contexts:
@@ -364,8 +372,13 @@ def render_project_context(context: ProjectContext) -> str:
         lines.append(f"- `{command}`")
     lines.extend(["", "## Explicit Follow-Ups", ""])
     if not context.follow_ups:
-        lines.append("No explicit TODO/checklist/follow-up markers found in source docs.")
+        lines.append("No explicit TODO/FIXME/ACTION/follow-up markers found in source docs.")
     for item in context.follow_ups:
+        lines.append(f"- {item}")
+    lines.extend(["", "## Checklist Items (not tasks)", ""])
+    if not context.checklist:
+        lines.append("No unchecked checklist boxes found in source docs.")
+    for item in context.checklist:
         lines.append(f"- {item}")
     lines.extend(["", "## Source Excerpts", ""])
     for source in context.sources:
@@ -420,22 +433,37 @@ def _commands(root: Path) -> list[str]:
     return _unique(commands, limit=12)
 
 
-def _follow_ups(sources: list[Path], limit: int = 12) -> list[str]:
-    patterns = [
-        re.compile(r"^\s*(?:[-*]\s*)?\[\s\]\s+(.{3,220})$"),
-        re.compile(r"^\s*(?:TODO|FIXME|ACTION|FOLLOW[ -]?UP)\s*:?\s+(.{3,220})$", re.IGNORECASE),
-    ]
+# `task-sync` imports the follow-ups and only the follow-ups, so the split
+# between these two decides what can become a durable task. An explicit marker
+# is the owner writing work down; an unchecked box is a line in somebody's
+# checklist -- an acceptance criterion, a plan template -- which belongs in the
+# note for a human to read and never in the ledger.
+FOLLOW_UP_PATTERN = re.compile(
+    r"^\s*(?:TODO|FIXME|ACTION|FOLLOW[ -]?UP)\s*:?\s+(.{3,220})$", re.IGNORECASE
+)
+CHECKLIST_PATTERN = re.compile(r"^\s*(?:[-*]\s*)?\[\s\]\s+(.{3,220})$")
+
+
+def _marked_lines(sources: list[Path], pattern: re.Pattern[str], limit: int) -> list[str]:
     items: list[str] = []
     for source in sources:
         for line in _read_head(source).splitlines():
-            for pattern in patterns:
-                match = pattern.search(line)
-                if match:
-                    items.append(f"{match.group(1).strip()} ({source})")
-                    break
+            match = pattern.search(line)
+            if match:
+                items.append(f"{match.group(1).strip()} ({source})")
             if len(items) >= limit:
                 return _unique(items, limit=limit)
     return _unique(items, limit=limit)
+
+
+def _follow_ups(sources: list[Path], limit: int = 12) -> list[str]:
+    """Work the owner wrote down explicitly. `task-sync` may import these."""
+    return _marked_lines(sources, FOLLOW_UP_PATTERN, limit)
+
+
+def _checklist(sources: list[Path], limit: int = 12) -> list[str]:
+    """Unchecked boxes from someone's checklist. Shown in the note, never synced."""
+    return _marked_lines(sources, CHECKLIST_PATTERN, limit)
 
 
 def _excerpt(source: Path, limit: int = 1200) -> str:

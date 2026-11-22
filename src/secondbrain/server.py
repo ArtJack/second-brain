@@ -24,7 +24,7 @@ from .ingest import ingest_text
 from .llm import answer_stream, embed
 from .memory import learn as learn_memory
 from .store import Store
-from .tasks import TaskStore
+from .tasks import MAX_PAGE, TaskStore
 
 
 class Corpus(str, Enum):
@@ -485,11 +485,17 @@ def learn(req: LearnRequest, auth: AuthContext = Depends(auth_context)) -> dict:
 @app.get("/tasks")
 def list_tasks(
     status: str = Query(default="open", pattern="^(open|done|all)$"),
+    limit: int = Query(default=50, ge=1, le=MAX_PAGE),
+    offset: int = Query(default=0, ge=0),
     auth: AuthContext = Depends(auth_context),
 ) -> dict:
     _require_owner(auth)
-    tasks = TaskStore().list(status=status)
-    return {"count": len(tasks), "tasks": tasks}
+    store = TaskStore()
+    total = store.count(status)
+    tasks = store.list(status=status, limit=limit, offset=offset)
+    # `total` is every task with this status; `count` is the old name for
+    # `showing`, the size of this page, and was read as the total.
+    return {"total": total, "showing": len(tasks), "offset": offset, "count": len(tasks), "tasks": tasks}
 
 
 @app.post("/tasks")

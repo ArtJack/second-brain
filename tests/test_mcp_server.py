@@ -59,7 +59,10 @@ def test_list_tasks_passes_status(monkeypatch):
         def __init__(self, *a, **k):
             pass
 
-        def list(self, status="open", limit=50):
+        def count(self, status="open"):
+            return 1
+
+        def list(self, status="open", limit=50, offset=0):
             captured["status"] = status
             return [{"id": 1, "title": "t", "status": status, "created_at": "now", "notes": "", "completed_at": None}]
 

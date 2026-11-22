@@ -114,7 +114,7 @@ def test_the_mcp_ask_tool_forwards_its_corpus(monkeypatch):
             "answer": "x",
             "sources": [],
             "invalid_citations": [],
-            "grounding": {"citations_present": False, "sources_retrieved": 0},
+            "grounding": {"citations_present": False, "sources_retrieved": 0, "unsupported": False},
         }
 
     monkeypatch.setattr(mcp_server, "ask_fn", fake_ask)

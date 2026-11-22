@@ -19,6 +19,7 @@ are therefore tokenized in Python and rebuilt as quoted terms.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import sqlite3
 from pathlib import Path
@@ -69,9 +70,10 @@ def query_terms(text: str) -> list[str]:
 
     When the filter leaves nothing but identifiers, the question's other short
     words stay, as the fallback kept them before: a pull request asked for by
-    number still searches `pr` beside the number. Stopwords stay out, and so do
-    single letters, which are fragments such as the `s` of "what's", and the pieces
-    of a joined identifier, which the identifier itself stands in for.
+    number still searches `pr` beside the number, and `R 4.3` still searches `r`.
+    Stopwords stay out, and so do the pieces of a joined identifier, which the
+    identifier itself stands in for, and a single letter an apostrophe put there,
+    such as the `s` of "what's".
     """
     lowered = text.lower()
     words = _WORD.findall(lowered)
@@ -82,7 +84,11 @@ def query_terms(text: str) -> list[str]:
         return meaningful or words
     if not meaningful:
         pieces = {word for span in spans for word in _WORD.findall(span)}
-        return [word for word in words if len(word) > 1 and word not in STOPWORDS and word not in pieces] + identifiers
+        # A single letter is dropped only when an apostrophe put it there: the `s`
+        # of "what's" is a fragment, the `r` of "R 4.3" is the name being asked about.
+        fragments = set(re.findall(r"['’](\w)\b", lowered))
+        kept = [w for w in words if w not in STOPWORDS and w not in pieces and w not in fragments]
+        return kept + identifiers
     return meaningful + identifiers
 
 
@@ -104,8 +110,22 @@ _COLUMNS = ("source", "chunk", "name", "header", "document")
 
 
 def _table(collection: str) -> str:
-    """A collection name as a safe table identifier."""
-    return "kw_" + re.sub(r"\W+", "_", collection)
+    """A collection name as a safe table identifier, one table per name.
+
+    Replacing every run of non-word characters is safe but many-to-one:
+    `second-brain` and `second_brain` both produced `kw_second_brain`, so two
+    corpora shared one table, keyword search for either could return the
+    other's chunks, and `reset` for one dropped the other's index. Collection
+    names are configuration, and a hyphen is conventional in Qdrant and Chroma.
+
+    A name the substitution leaves untouched keeps the table it already has,
+    which is every collection in use. Any other name carries a digest of the
+    real name, under a prefix an untouched name cannot produce.
+    """
+    safe = re.sub(r"\W+", "_", collection)
+    if safe == collection:
+        return "kw_" + safe
+    return f"kwx_{safe}_{hashlib.sha256(collection.encode('utf-8')).hexdigest()[:8]}"
 
 
 def default_index_path() -> Path:
@@ -115,11 +135,22 @@ def default_index_path() -> Path:
 class KeywordIndex:
     def __init__(self, path: Path | None = None) -> None:
         _require_fts5()
-        self.path = Path(path) if path is not None else default_index_path()
+        self._path = Path(path) if path is not None else None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._known: set[str] = set()
+        self._known_in = self.path
+
+    @property
+    def path(self) -> Path:
+        """The given path, or the default one beside cfg.state_db, read at use time
+        as `Store()` reads cfg, so an index follows config.refresh()."""
+        return self._path if self._path is not None else default_index_path()
 
     def _connect(self) -> sqlite3.Connection:
+        path = self.path
+        if path != self._known_in:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._known, self._known_in = set(), path
         # WAL, because the MCP tools became genuinely concurrent: ingest writes
         # this file from one worker thread while ask reads it from another. In
         # the default rollback-journal mode a write holds an EXCLUSIVE lock for
@@ -127,7 +158,7 @@ class KeywordIndex:
         # raising `database is locked` — which reached the client as a hard error
         # on the user-facing path. WAL lets readers proceed during a write; the
         # longer timeout covers the checkpoint.
-        conn = sqlite3.connect(self.path, timeout=30)
+        conn = sqlite3.connect(path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=30000")

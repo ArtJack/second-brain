@@ -7,9 +7,21 @@ from pathlib import Path
 
 from .config import cfg
 
+# The filters a caller may ask for. A status outside these matches no task, and
+# a typo answering "0 tasks" looks like an empty ledger, so the edges refuse it.
+STATUSES = ("open", "done", "all")
+# The largest page the MCP tool and the web API serve in one response.
+MAX_PAGE = 200
+
 
 def _now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+def _status_filter(status: str) -> tuple[str, list[object]]:
+    if status == "all":
+        return "", []
+    return " WHERE status = ?", [status]
 
 
 class TaskStore:
@@ -57,17 +69,31 @@ class TaskStore:
             raise KeyError(f"task {task_id} not found")
         return dict(row)
 
-    def list(self, status: str = "open", limit: int = 50) -> list[dict]:
-        query = "SELECT * FROM tasks"
-        params: list[object] = []
-        if status != "all":
-            query += " WHERE status = ?"
-            params.append(status)
-        query += " ORDER BY id DESC LIMIT ?"
-        params.append(limit)
+    def list(self, status: str = "open", limit: int = 50, offset: int = 0) -> list[dict]:
+        """One page of tasks, newest first.
+
+        A page is not the ledger: the default page holds the newest 50, and
+        callers that reported its length as "the tasks" hid every older one.
+        `count()` gives the total the page is drawn from.
+        """
+        if limit < 1:
+            raise ValueError(f"limit must be at least 1, not {limit}")
+        if offset < 0:
+            raise ValueError(f"offset cannot be negative, not {offset}")
+        where, params = _status_filter(status)
         with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM tasks{where} ORDER BY id DESC LIMIT ? OFFSET ?",
+                [*params, limit, offset],
+            ).fetchall()
         return [dict(row) for row in rows]
+
+    def count(self, status: str = "open") -> int:
+        """How many tasks have `status` ("all" counts every task)."""
+        where, params = _status_filter(status)
+        with self._connect() as conn:
+            (total,) = conn.execute(f"SELECT COUNT(*) FROM tasks{where}", params).fetchone()
+        return int(total)
 
     def complete(self, task_id: int) -> dict:
         with self._connect() as conn:

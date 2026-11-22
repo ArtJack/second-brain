@@ -10,12 +10,20 @@ export type BrainSource = {
   text?: string;
 };
 
+export type Grounding = {
+  citations_present?: boolean;
+  sources_retrieved?: number;
+  refused?: boolean;
+  unsupported?: boolean;
+};
+
 export type BrainAnswer = {
   answer: string;
   latencyMs: number;
   model: string;
   sources: BrainSource[];
   invalid_citations?: number[];
+  grounding?: Grounding;
 };
 
 export type CorpusFallback = {
@@ -45,6 +53,7 @@ export type ChatMessage = {
   model?: string;
   sources?: BrainSource[];
   invalidCitations?: number[];
+  unsupported?: boolean;
   streaming?: boolean;
   offline?: boolean;
 };

@@ -1,4 +1,12 @@
-"""Import explicit follow-ups into the durable task store."""
+"""Import explicit follow-ups into the durable task store.
+
+Two sources feed this, and they are trusted differently. The project-context
+index carries follow-ups the owner marked in their own docs, so it syncs by
+default. An overnight report is a machine reading of files the scan walked
+read-only -- mostly other repositories' -- so its lines are imported only when
+someone asks for them with `--include-overnight`. Both sources hand over
+marker-carrying lines only; unchecked checklist boxes stay in the report.
+"""
 from __future__ import annotations
 
 import re
@@ -69,7 +77,7 @@ def candidates_from_latest_overnight() -> list[TaskCandidate]:
 def collect_task_candidates(
     project_context_root: Path = DEFAULT_OUTPUT_DIR,
     *,
-    include_overnight: bool = True,
+    include_overnight: bool = False,
 ) -> list[TaskCandidate]:
     candidates = candidates_from_project_context(project_context_root)
     if include_overnight:
@@ -90,7 +98,7 @@ def sync_tasks(
     store: TaskStore | None = None,
     project_context_root: Path = DEFAULT_OUTPUT_DIR,
     dry_run: bool = False,
-    include_overnight: bool = True,
+    include_overnight: bool = False,
 ) -> dict:
     task_store = store or TaskStore()
     existing = {dedupe_key(task["title"]) for task in task_store.list(status="all", limit=1000)}

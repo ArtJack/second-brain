@@ -537,10 +537,15 @@ def project_context(
 @app.command("task-sync")
 def task_sync(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show tasks that would be added without writing"),
+    include_overnight: bool = typer.Option(
+        False,
+        "--include-overnight",
+        help="Also import marked follow-ups from the latest overnight report (off by default)",
+    ),
 ):
     """Import explicit project follow-ups into the task store with dedupe."""
     try:
-        res = sync_tasks(dry_run=dry_run)
+        res = sync_tasks(dry_run=dry_run, include_overnight=include_overnight)
     except Exception as exc:
         console.print(f"[red]task-sync failed:[/] {exc}")
         raise typer.Exit(1) from exc
@@ -743,6 +748,10 @@ def health(
         raise typer.Exit(1) from exc
     console.print(Panel(res["markdown"], title="health", border_style="green" if res["failed"] == 0 else "yellow"))
     console.print(f"[dim]saved: {res['path']}[/]")
+    if res["failed"]:
+        # The panel colour was the only sign, and nothing that runs this command
+        # reads colours: the nightly saw exit 0 whatever failed.
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
