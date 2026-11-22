@@ -21,6 +21,10 @@ HTTP env:
 Run:
     uv run sb-mcp                                  # stdio
     SB_MCP_TRANSPORT=http SB_MCP_TOKEN=… uv run sb-mcp
+
+Every tool call first re-reads .env if it changed (config.refresh), so a
+rotated key or a moved gateway or store reaches a server that has run for days.
+The transport settings above apply when the server starts.
 """
 from __future__ import annotations
 
@@ -29,6 +33,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -36,7 +41,7 @@ from mcp.types import ToolAnnotations
 
 from .ask import ask as ask_fn
 from .ask import recall as recall_fn
-from .config import cfg, collections_for
+from .config import cfg, collections_for, refresh
 from .ingest import ingest_paths
 from .keyword_index import KeywordIndex
 from .memory import learn as learn_memory
@@ -68,7 +73,16 @@ def _transport_security() -> TransportSecuritySettings:
     return TransportSecuritySettings(allowed_hosts=allowed_hosts, allowed_origins=allowed_origins)
 
 
-mcp = FastMCP(
+class _Server(FastMCP):
+    """FastMCP whose every tool call starts on the current .env (config.refresh)."""
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        if refresh():
+            log.info("Settings re-read from .env before %s", name)
+        return await super().call_tool(name, arguments)
+
+
+mcp = _Server(
     "second-brain",
     instructions=(
         "Your second brain: a personal RAG assistant over the user's own notes, "

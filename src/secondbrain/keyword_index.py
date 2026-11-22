@@ -115,11 +115,22 @@ def default_index_path() -> Path:
 class KeywordIndex:
     def __init__(self, path: Path | None = None) -> None:
         _require_fts5()
-        self.path = Path(path) if path is not None else default_index_path()
+        self._path = Path(path) if path is not None else None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._known: set[str] = set()
+        self._known_in = self.path
+
+    @property
+    def path(self) -> Path:
+        """The given path, or the default one beside cfg.state_db, read at use time
+        as `Store()` reads cfg, so an index follows config.refresh()."""
+        return self._path if self._path is not None else default_index_path()
 
     def _connect(self) -> sqlite3.Connection:
+        path = self.path
+        if path != self._known_in:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._known, self._known_in = set(), path
         # WAL, because the MCP tools became genuinely concurrent: ingest writes
         # this file from one worker thread while ask reads it from another. In
         # the default rollback-journal mode a write holds an EXCLUSIVE lock for
@@ -127,7 +138,7 @@ class KeywordIndex:
         # raising `database is locked` — which reached the client as a hard error
         # on the user-facing path. WAL lets readers proceed during a write; the
         # longer timeout covers the checkpoint.
-        conn = sqlite3.connect(self.path, timeout=30)
+        conn = sqlite3.connect(path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=30000")
