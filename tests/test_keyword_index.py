@@ -212,7 +212,7 @@ def test_stopwords_are_dropped_so_common_words_do_not_dilute_the_ranking(index):
     index.upsert_chunks(
         "c",
         _rows(
-            ("/right.md", 0, "Invoice format: PDF with line items, one per delivery."),
+            ("/right.md", 0, "Synthetic invoice format fixture row, one per ranking test."),
             ("/noise.md", 0, "What is the thing that is in the place with the other things?"),
         ),
     )
