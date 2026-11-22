@@ -7,7 +7,15 @@ prose reading is still worth showing in the overnight report â€” it is a hint â€
 but a hint is not a commitment, and the ledger is the one place that must hold
 only things the owner actually wrote down as work.
 
-The separation is enforced at two levels: the extractor returns the two kinds
+An unchecked box is the same mistake in a different shape, and it is the one
+that actually filled the ledger: the overnight scan walks other repositories
+read-only, and their QA reports, plan documents and templates are mostly
+checklists. "[ ] venv/bin/pytest passes" is an acceptance criterion somebody
+else is tracking; "[ ] tasks" is a heading that happened to be typed as a box.
+34 rows of that had to be deleted by hand on 2026-09-11. So a box belongs with
+the mentions: reported for a human to read, never synced.
+
+The separation is enforced at two levels: the extractor returns the three kinds
 separately, and the report renders them under different headings, because
 `task-sync` reads the report's "Possible tasks:" section.
 """
@@ -15,11 +23,18 @@ from __future__ import annotations
 
 import json
 
-from secondbrain.overnight import ensure_config, extract_mentions, extract_tasks, run_overnight
+from secondbrain.overnight import (
+    ensure_config,
+    extract_checklist,
+    extract_mentions,
+    extract_tasks,
+    run_overnight,
+)
 
 TEXT = """
 TODO: renew the server certificate
 - [ ] Review the new lease document
+- [ ] venv/bin/pytest passes
 - [x] Already finished
 We should follow up with Alex about the Qdrant key.
 You need to install Node 20 before running this.
@@ -30,8 +45,18 @@ def test_explicit_markers_are_tasks():
     tasks = extract_tasks(TEXT)
 
     assert "renew the server certificate" in tasks
-    assert "Review the new lease document" in tasks
     assert "Already finished" not in tasks
+
+
+def test_an_unchecked_box_is_a_checklist_item_not_a_task():
+    tasks = extract_tasks(TEXT)
+    checklist = extract_checklist(TEXT)
+
+    assert "Review the new lease document" not in tasks
+    assert "venv/bin/pytest passes" not in tasks
+    assert "Review the new lease document" in checklist
+    assert "venv/bin/pytest passes" in checklist
+    assert "Already finished" not in checklist
 
 
 def test_prose_is_a_mention_not_a_task():
@@ -44,7 +69,7 @@ def test_prose_is_a_mention_not_a_task():
     assert any("follow up with Alex" in mention for mention in mentions)
 
 
-def test_report_keeps_mentions_out_of_the_section_task_sync_reads(tmp_path):
+def test_report_keeps_mentions_and_boxes_out_of_the_section_task_sync_reads(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
     (source / "readme.md").write_text(TEXT)
@@ -60,5 +85,9 @@ def test_report_keeps_mentions_out_of_the_section_task_sync_reads(tmp_path):
     tasks_section = report.split("Possible tasks:")[1].split("\n\n")[0]
     assert "renew the server certificate" in tasks_section
     assert "install Node 20" not in tasks_section
+    assert "venv/bin/pytest passes" not in tasks_section
+
     assert "Mentions (not tasks):" in report
     assert "install Node 20" in report.split("Mentions (not tasks):")[1]
+    assert "Checklist items (not tasks):" in report
+    assert "venv/bin/pytest passes" in report.split("Checklist items (not tasks):")[1]

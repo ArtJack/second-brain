@@ -328,3 +328,48 @@ class TestTheBenchmarkDefinitionsAreFixturesToo:
         bench.write_text("{}")
 
         assert [p.name for p in discover(bench)] == ["hard.json"]
+
+
+class TestTheEvalLogIsNotANote:
+    """`docs/eval-results.md` records what the brain was asked during testing.
+
+    Every entry repeats the words of the query it measured, so ingested it becomes
+    a strong keyword match for that very question and competes with the notes that
+    answer it. Two branches had to reword their entries on 2026-09-12 for exactly
+    this reason; excluding the file retires the problem instead.
+    """
+
+    def test_the_scan_leaves_it_out(self, tmp_path):
+        from secondbrain import overnight
+
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "eval-results.md").write_text("## 2026-09-12 - a reading")
+        (tmp_path / "docs" / "design.md").write_text("a real document")
+
+        result = overnight.scan_targets({"targets": [str(tmp_path)]})
+
+        names = [p.name for p in result.files]
+        assert "design.md" in names
+        assert "eval-results.md" not in names
+
+    def test_direct_ingest_leaves_it_out(self, tmp_path):
+        from secondbrain.ingest import discover
+
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "eval-results.md").write_text("## a reading")
+        (tmp_path / "docs" / "real.md").write_text("text")
+
+        assert [p.name for p in discover(tmp_path)] == ["real.md"]
+
+    def test_the_rule_is_shipped_and_anchored(self, tmp_path):
+        """An `eval-results.md` anywhere else belongs to someone else."""
+        from secondbrain.ingest import discover
+        from secondbrain.overnight import DEFAULT_CONFIG
+
+        assert "docs/eval-results.md" in DEFAULT_CONFIG["exclude_dirs"]
+        assert "eval-results.md" not in DEFAULT_CONFIG["exclude_dirs"], "too generic to match at any depth"
+        elsewhere = tmp_path / "notes" / "eval-results.md"
+        elsewhere.parent.mkdir(parents=True)
+        elsewhere.write_text("a note the owner wrote")
+
+        assert [p.name for p in discover(tmp_path)] == ["eval-results.md"]

@@ -212,7 +212,7 @@ def test_stopwords_are_dropped_so_common_words_do_not_dilute_the_ranking(index):
     index.upsert_chunks(
         "c",
         _rows(
-            ("/right.md", 0, "Invoice format: PDF with line items, one per delivery."),
+            ("/right.md", 0, "Synthetic invoice format fixture row, one per ranking test."),
             ("/noise.md", 0, "What is the thing that is in the place with the other things?"),
         ),
     )
@@ -671,3 +671,49 @@ def test_the_identifier_rule_keeps_its_edge_decisions(question, terms):
     from secondbrain.keyword_index import query_terms
 
     assert query_terms(question) == terms
+
+
+def test_two_collection_names_that_differ_only_in_punctuation_keep_separate_tables(tmp_path):
+    """SB-F-28: `second-brain` and `second_brain` were sanitised onto one table.
+
+    Collection names come from configuration, and a hyphen is conventional in
+    Qdrant and Chroma. Sharing a table meant keyword search for one corpus could
+    return the other's chunks, and a reset for one dropped the other's index.
+    """
+    from secondbrain.keyword_index import _table
+
+    index = KeywordIndex(tmp_path / "keyword-index.sqlite3")
+    index.upsert_chunks("second_brain", _rows(("/underscore.md", 0, "zephyrquill in the underscore corpus")))
+    index.upsert_chunks("second-brain", _rows(("/hyphen.md", 0, "zephyrquill in the hyphen corpus")))
+
+    assert [h["metadata"]["source"] for h in index.query("second_brain", "zephyrquill", limit=5)] == ["/underscore.md"]
+    assert [h["metadata"]["source"] for h in index.query("second-brain", "zephyrquill", limit=5)] == ["/hyphen.md"]
+
+    index.reset("second-brain")
+
+    assert index.count("second_brain") == 1, "a reset for one collection dropped the other's index"
+    assert index.count("second-brain") == 0
+    # Every collection in use is word-only, and keeps the table it already has.
+    assert _table("second_brain_v2") == "kw_second_brain_v2"
+
+
+def test_a_one_letter_name_is_searched_but_a_contraction_fragment_is_not(index):
+    """SB-F-60: dropping every single letter also dropped names like R.
+
+    The rule existed to keep the `s` of "what's" out of the terms. A fragment is
+    what an apostrophe leaves behind; a name is not.
+    """
+    from secondbrain.keyword_index import query_terms
+
+    index.upsert_chunks(
+        "c",
+        _rows(
+            ("/notes/r.md", 0, "R 4.3 is the version of R used for the sample analysis."),
+            ("/notes/version.md", 0, "Version 4.3. of the sample toolchain."),
+        ),
+    )
+
+    assert query_terms("R 4.3") == ["r", "4.3"]
+    assert query_terms("What's QQ-F-43?") == ["qq-f-43"]
+    assert query_terms("Is it QQ-F-43?") == ["it", "qq-f-43"]
+    assert index.query("c", "R 4.3", limit=5)[0]["metadata"]["source"] == "/notes/r.md"
