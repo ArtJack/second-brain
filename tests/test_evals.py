@@ -267,22 +267,22 @@ class TestPassageAndDistractorScoring:
 
     def test_a_case_fails_when_the_right_file_arrives_without_the_answering_passage(self):
         report = run_benchmark(
-            _benchmark([_case(expected_chunk_contains=["restic runs at 02:00"])]),
-            retrieve_fn=lambda q, k: [self._hit("notes/lab.md", "an early section about backups")],
+            _benchmark([_case(expected_chunk_contains=["fixture-token alpha runs at step 7"])]),
+            retrieve_fn=lambda q, k: [self._hit("notes/lab.md", "an early synthetic section")],
         )
 
         case = report["cases"][0]["retrieval"]
         assert case["source_recall"] == 1.0, "the file itself was retrieved"
         assert case["passage_recall"] == 0.0
         assert case["passed"] is False, "finding the document is not answering the question"
-        assert case["missing_passages"] == ["restic runs at 02:00"]
+        assert case["missing_passages"] == ["fixture-token alpha runs at step 7"]
 
     def test_a_case_passes_when_the_answering_passage_is_in_any_retrieved_chunk(self):
         report = run_benchmark(
-            _benchmark([_case(expected_chunk_contains=["restic runs at 02:00"])]),
+            _benchmark([_case(expected_chunk_contains=["fixture-token alpha runs at step 7"])]),
             retrieve_fn=lambda q, k: [
                 self._hit("notes/lab.md", "intro"),
-                self._hit("notes/lab.md", "The offsite copy: restic runs at 02:00 daily."),
+                self._hit("notes/lab.md", "The synthetic chunk: fixture-token alpha runs at step 7 here."),
             ],
         )
 
@@ -292,8 +292,8 @@ class TestPassageAndDistractorScoring:
 
     def test_passage_matching_ignores_case_and_surrounding_whitespace(self):
         report = run_benchmark(
-            _benchmark([_case(expected_chunk_contains=["Restic Runs At 02:00"])]),
-            retrieve_fn=lambda q, k: [self._hit("notes/lab.md", "...restic  runs\nat 02:00...")],
+            _benchmark([_case(expected_chunk_contains=["Fixture-Token Alpha Runs At Step 7"])]),
+            retrieve_fn=lambda q, k: [self._hit("notes/lab.md", "...fixture-token  alpha runs\nat step 7...")],
         )
 
         assert report["cases"][0]["retrieval"]["passage_recall"] == 1.0
@@ -493,3 +493,68 @@ class TestScoringNothingIsNotPassing:
         report = run_benchmark(_benchmark([]), retrieve_fn=lambda q, k: [])
 
         assert report["passed"] is False
+
+
+class TestScoringThroughRecall:
+    """`sb eval` scored `hybrid_retrieve` directly, so no reading could show a change to `recall`.
+
+    The MCP server tells agents to ground themselves with `recall`. Until
+    2026-09-12 it searched vectors only while every benchmark reading used hybrid, and
+    the gate on retrieval changes had no way to see the path agents take.
+    `--via-recall` scores what `recall` returns instead.
+    """
+
+    def test_recall_retrieve_scores_exactly_what_recall_returned(self, monkeypatch):
+        from secondbrain import evals
+
+        seen = {}
+
+        def fake_recall(query, top_k=0):
+            seen.update(query=query, top_k=top_k)
+            return {
+                "count": 1,
+                "hits": [{"source": "/Users/artjack/notes/lab.md", "distance": 0.1234, "text": "the answering passage"}],
+            }
+
+        monkeypatch.setattr(evals, "recall", fake_recall)
+
+        report = run_benchmark(
+            _benchmark([_case(expected_chunk_contains=["answering passage"])]),
+            top_k=4,
+            retrieve_fn=evals.recall_retrieve,
+        )
+
+        assert seen == {"query": "where is the gateway?", "top_k": 4}
+        retrieval = report["cases"][0]["retrieval"]
+        assert retrieval["retrieved_sources"] == ["/Users/artjack/notes/lab.md"]
+        assert retrieval["passage_recall"] == 1.0
+        assert report["passed"] is True
+
+    def test_the_cli_flag_scores_through_recall_and_the_report_says_which_path_ran(self, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        from secondbrain import cli, evals
+
+        monkeypatch.setattr(evals, "_default_retrieve", lambda query, top_k: [_hit("/elsewhere/engine.md")])
+        monkeypatch.setattr(
+            evals,
+            "recall",
+            lambda query, top_k=0: {
+                "count": 1,
+                "hits": [{"source": "/Users/artjack/notes/lab.md", "distance": 0.1, "text": "context"}],
+            },
+        )
+        benchmark = tmp_path / "benchmark.json"
+        benchmark.write_text(json.dumps(_benchmark([_case()])), encoding="utf-8")
+
+        via_recall = CliRunner().invoke(cli.app, ["eval", str(benchmark), "--via-recall", "--json"])
+        default = CliRunner().invoke(cli.app, ["eval", str(benchmark), "--json"])
+
+        recall_report, default_report = json.loads(via_recall.stdout), json.loads(default.stdout)
+        assert recall_report["retriever"] == "recall"
+        assert recall_report["cases"][0]["retrieval"]["retrieved_sources"] == ["/Users/artjack/notes/lab.md"]
+        assert via_recall.exit_code == 0
+        # The default is untouched: still hybrid_retrieve, and still failing this case.
+        assert default_report["retriever"] == "hybrid_retrieve"
+        assert default_report["cases"][0]["retrieval"]["retrieved_sources"] == ["/elsewhere/engine.md"]
+        assert default.exit_code == 1

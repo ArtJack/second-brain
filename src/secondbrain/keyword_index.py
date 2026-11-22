@@ -29,6 +29,11 @@ from .config import cfg
 # as readily as ASCII — the whole point of replacing the old [a-z0-9]+ tokenizer.
 _WORD = re.compile(r"\w+", re.UNICODE)
 
+# A run of words joined the way identifiers are written: `XX-F-12`, `192.0.2.7:9`,
+# `1999-01-02`. Not by `/`, which separates rather than joins: `XX-F-12/13` names
+# two identifiers, and as one phrase it would match neither.
+_SPAN = re.compile(r"\w+(?:[-.:]\w+)*", re.UNICODE)
+
 # Terms carried over from the hand-rolled scorer this replaces. Dropping them is
 # not cosmetic: the match expression joins terms with OR, so leaving "what", "is"
 # and "the" in a question makes every document containing them a candidate and
@@ -49,10 +54,36 @@ def query_terms(text: str) -> list[str]:
     and any language whose function words are not in an English stopword list —
     a Russian query keeps all of its terms, which is correct, because none of
     them are in the set above.
+
+    Identifiers are the exception to the length filter, because their short parts
+    are the most specific words a question has. A production question that named an
+    identifier lost every part of it to the filter and searched only its common
+    words, which matched hundreds of chunks and left the few containing the
+    identifier out of the top twenty. So a span with a digit in it is kept whole,
+    and `query` quotes it like any other term, which FTS5 reads as a phrase: the
+    tokens adjacent and in order. As loose parts it would match almost anything,
+    because one- and two-character tokens are among the commonest in the corpus.
+    The digit is what separates an identifier from `re-ingest`, so a question
+    without one searches exactly the terms it did before. A span the filter
+    already kept, such as `8765`, is not added again, which would double its weight.
+
+    When the filter leaves nothing but identifiers, the question's other short
+    words stay, as the fallback kept them before: a pull request asked for by
+    number still searches `pr` beside the number. Stopwords stay out, and so do
+    single letters, which are fragments such as the `s` of "what's", and the pieces
+    of a joined identifier, which the identifier itself stands in for.
     """
-    words = _WORD.findall(text.lower())
+    lowered = text.lower()
+    words = _WORD.findall(lowered)
     meaningful = [word for word in words if word not in STOPWORDS and len(word) > 2]
-    return meaningful or words
+    spans = [span for span in dict.fromkeys(_SPAN.findall(lowered)) if re.search(r"\d", span)]
+    identifiers = [span for span in spans if span not in meaningful]
+    if not identifiers:
+        return meaningful or words
+    if not meaningful:
+        pieces = {word for span in spans for word in _WORD.findall(span)}
+        return [word for word in words if len(word) > 1 and word not in STOPWORDS and word not in pieces] + identifiers
+    return meaningful + identifiers
 
 
 def _require_fts5() -> None:
@@ -68,7 +99,7 @@ def _require_fts5() -> None:
 
 
 # The shape a table must have to be usable. A table that does not match is from
-# an older version and is dropped rather than written to.
+# an older version and is migrated in place, rows and all, before use.
 _COLUMNS = ("source", "chunk", "name", "header", "document")
 
 
@@ -105,14 +136,9 @@ class KeywordIndex:
     def _ensure(self, conn: sqlite3.Connection, collection: str) -> str:
         table = _table(collection)
         if table not in self._known:
-            # `IF NOT EXISTS` keeps whatever is already on disk, so a table built
-            # by an older version stays at its old column count and every insert
-            # raises. The index is a derived cache with `rebuild_from_store` to
-            # repopulate it, so the honest move is to drop a table whose shape no
-            # longer matches and let the next ingest or reindex refill it —
-            # rather than fail at 03:15 on the deployed machine.
-            if self._columns(conn, table) not in (None, _COLUMNS):
-                conn.execute(f"DROP TABLE {table}")
+            # Brought up to the current columns with its rows, never dropped:
+            # `_migrate` records what dropping cost.
+            self._migrate(conn, table)
             conn.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS {table} USING fts5("
                 "source UNINDEXED, chunk UNINDEXED, name UNINDEXED, header, document, "
@@ -120,6 +146,37 @@ class KeywordIndex:
             )
             self._known.add(table)
         return table
+
+    def _migrate(self, conn: sqlite3.Connection, table: str) -> None:
+        """Bring a table built by an older version up to the current columns, keeping its rows.
+
+        The first version dropped any table whose columns did not match and said
+        "the next ingest or reindex" would refill it. Only a reindex refills a
+        whole collection; an ingest refills the files it touched. So the nightly
+        after a schema change would have replaced a 3,820-row index with the few
+        dozen rows of that night's changed files, and keyword search would have
+        silently covered a sliver of the corpus. Reads were no better: a query
+        naming the new column against an old table raised, retrieval swallowed the
+        error, and every answer went vector-only without a line in any log.
+
+        FTS5 cannot add a column, so the rows are copied into a table of the
+        current shape and the old one is dropped. A column the old table lacks is
+        filled with empty strings; a reindex fills it properly.
+        """
+        existing = self._columns(conn, table)
+        if existing is None or existing == _COLUMNS:
+            return
+        scratch = f"{table}__migrating"
+        conn.execute(f"DROP TABLE IF EXISTS {scratch}")
+        conn.execute(
+            f"CREATE VIRTUAL TABLE {scratch} USING fts5("
+            "source UNINDEXED, chunk UNINDEXED, name UNINDEXED, header, document, "
+            "tokenize='unicode61 remove_diacritics 2')"
+        )
+        carried = ", ".join(column if column in existing else "''" for column in _COLUMNS)
+        conn.execute(f"INSERT INTO {scratch} ({', '.join(_COLUMNS)}) SELECT {carried} FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {scratch} RENAME TO {table}")
 
     def _columns(self, conn: sqlite3.Connection, table: str) -> tuple[str, ...] | None:
         """The existing table's columns, or None if it does not exist."""
@@ -135,7 +192,13 @@ class KeywordIndex:
         row = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
         ).fetchone()
-        return table if row else None
+        if not row:
+            return None
+        # A read must never meet an old-shaped table: querying a column it
+        # lacks raises, and retrieval turns that into a silent vector-only
+        # answer. Migrating here costs one copy, once.
+        self._migrate(conn, table)
+        return table
 
     def upsert_chunks(self, collection: str, rows: list[dict], replace: bool = True) -> None:
         """Write these rows, by default replacing everything already held for their sources.
