@@ -70,9 +70,10 @@ def query_terms(text: str) -> list[str]:
 
     When the filter leaves nothing but identifiers, the question's other short
     words stay, as the fallback kept them before: a pull request asked for by
-    number still searches `pr` beside the number. Stopwords stay out, and so do
-    single letters, which are fragments such as the `s` of "what's", and the pieces
-    of a joined identifier, which the identifier itself stands in for.
+    number still searches `pr` beside the number, and `R 4.3` still searches `r`.
+    Stopwords stay out, and so do the pieces of a joined identifier, which the
+    identifier itself stands in for, and a single letter an apostrophe put there,
+    such as the `s` of "what's".
     """
     lowered = text.lower()
     words = _WORD.findall(lowered)
@@ -83,7 +84,11 @@ def query_terms(text: str) -> list[str]:
         return meaningful or words
     if not meaningful:
         pieces = {word for span in spans for word in _WORD.findall(span)}
-        return [word for word in words if len(word) > 1 and word not in STOPWORDS and word not in pieces] + identifiers
+        # A single letter is dropped only when an apostrophe put it there: the `s`
+        # of "what's" is a fragment, the `r` of "R 4.3" is the name being asked about.
+        fragments = set(re.findall(r"['’](\w)\b", lowered))
+        kept = [w for w in words if w not in STOPWORDS and w not in pieces and w not in fragments]
+        return kept + identifiers
     return meaningful + identifiers
 
 

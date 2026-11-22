@@ -695,3 +695,25 @@ def test_two_collection_names_that_differ_only_in_punctuation_keep_separate_tabl
     assert index.count("second-brain") == 0
     # Every collection in use is word-only, and keeps the table it already has.
     assert _table("second_brain_v2") == "kw_second_brain_v2"
+
+
+def test_a_one_letter_name_is_searched_but_a_contraction_fragment_is_not(index):
+    """SB-F-60: dropping every single letter also dropped names like R.
+
+    The rule existed to keep the `s` of "what's" out of the terms. A fragment is
+    what an apostrophe leaves behind; a name is not.
+    """
+    from secondbrain.keyword_index import query_terms
+
+    index.upsert_chunks(
+        "c",
+        _rows(
+            ("/notes/r.md", 0, "R 4.3 is the version of R used for the sample analysis."),
+            ("/notes/version.md", 0, "Version 4.3. of the sample toolchain."),
+        ),
+    )
+
+    assert query_terms("R 4.3") == ["r", "4.3"]
+    assert query_terms("What's QQ-F-43?") == ["qq-f-43"]
+    assert query_terms("Is it QQ-F-43?") == ["it", "qq-f-43"]
+    assert index.query("c", "R 4.3", limit=5)[0]["metadata"]["source"] == "/notes/r.md"
