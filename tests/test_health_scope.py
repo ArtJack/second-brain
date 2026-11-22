@@ -138,10 +138,25 @@ class TestTransitions:
 
 class TestDeployedLabels:
     def test_the_launchd_labels_come_from_the_plists_this_repo_ships(self):
-        """A hardcoded label can be green while the service that exists is down."""
+        """A hardcoded label can be green while the service that exists is down.
+
+        The web demo's service is not among them: its public page was retired, and
+        a probe of a service that is off on purpose fails every night.
+        """
         from secondbrain.health import deployed_labels
 
-        labels = deployed_labels()
+        assert deployed_labels() == ["com.secondbrain.mcp", "com.secondbrain.overnight"]
 
-        assert "com.secondbrain.mcp" in labels, labels
-        assert any("sb-web" in label for label in labels), labels
+    def test_a_template_gives_its_label_without_its_placeholders_being_parsed(self, tmp_path, monkeypatch):
+        """A template's placeholders are not plist values, so its label is read as text."""
+        from secondbrain import health
+
+        launchd = tmp_path / "deploy" / "launchd"
+        launchd.mkdir(parents=True)
+        (launchd / "com.example.service.plist.template").write_text(
+            "<plist><dict>\n  <key>Label</key>\n  <string>com.example.service</string>\n"
+            "  <key>Program</key><string>__REPO__/bin/run</string>\n</dict></plist>\n"
+        )
+        monkeypatch.setattr(health, "_repo_root", lambda: tmp_path)
+
+        assert health.deployed_labels() == ["com.example.service"]
