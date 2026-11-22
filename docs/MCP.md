@@ -16,7 +16,7 @@ models called are the ones the engine already uses.
 | `recall(query, top_k=0)` | free (embed only) | Raw matching chunks, **no chat model** — cheapest grounding. |
 | `ingest(path)` | free (embed) | Chunk + embed + store a file or folder. |
 | `learn(fact)` | free (embed) | Save a durable Markdown memory and ingest it. |
-| `list_tasks(status="open")` | free | List tasks (`open` / `done` / `all`). |
+| `list_tasks(status="open", limit=50, offset=0)` | free | List tasks (`open` / `done` / `all`), newest first, a page at a time. Returns `total` (every task with that status) and `showing` (this page); page on with `offset`. |
 | `add_task(text)` | free | Add a task. |
 | `complete_task(task_id)` | free | Mark a task done. |
 | `status()` | free | Backend, models, store, chunk count (no secrets). |
@@ -34,7 +34,8 @@ Selected by `SB_MCP_TRANSPORT`:
 |---|---|---|
 | `SB_MCP_HOST` | `127.0.0.1` | Bind address. Use the Tailscale IP (`YOUR_TAILSCALE_IP`) to share across devices. |
 | `SB_MCP_PORT` | `8848` | Port. |
-| `SB_MCP_TOKEN` | _(unset)_ | If set, clients must send `Authorization: Bearer <token>`. Keep it in the git-ignored `.env`. |
+| `SB_MCP_TOKEN` | _(unset)_ | **Required.** Clients must send `Authorization: Bearer <token>`. Without it the HTTP transport refuses to start (exit code 2). Keep it in the git-ignored `.env`. |
+| `SB_MCP_ALLOW_NO_TOKEN` | _(unset)_ | `1` serves without a token, for local development. Honoured only when `SB_MCP_HOST` is a loopback address (`127.0.0.1`, `::1`, `localhost`); anywhere else the server still refuses to start. |
 | `SB_MCP_ALLOWED_HOSTS` | _(bind host + localhost)_ | Comma-separated extra `Host` headers to accept (e.g. a Tailscale MagicDNS name). DNS-rebinding protection stays on; the bind host and localhost are always allowed. |
 
 ## 1. The host machine — Claude Code (stdio)
@@ -118,8 +119,12 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8848/mcp -d '{
 
 ## Security notes
 
-- HTTP auth is a bearer token; transport privacy comes from **Tailscale** (encrypted mesh).
-  Bind to the Tailscale IP, not `0.0.0.0`, unless you intend LAN-wide access.
+- HTTP auth is a bearer token, compared in constant time; transport privacy comes from
+  **Tailscale** (encrypted mesh). Bind to the Tailscale IP, not `0.0.0.0`, unless you intend
+  LAN-wide access.
+- The HTTP transport fails closed: no `SB_MCP_TOKEN`, no server. A missing or renamed line in
+  `.env` stops the service with an error in its log instead of opening every tool to the
+  network.
 - Secrets (`SB_MCP_TOKEN`, `QDRANT_API_KEY`, `LITELLM_MASTER_KEY`) live only in the
   git-ignored `.env` — never commit them.
 - `ingest`/`learn` write to your store; `ask`/`recall`/`list_tasks`/`status` are read-only
