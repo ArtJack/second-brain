@@ -19,6 +19,7 @@ are therefore tokenized in Python and rebuilt as quoted terms.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import sqlite3
 from pathlib import Path
@@ -104,8 +105,22 @@ _COLUMNS = ("source", "chunk", "name", "header", "document")
 
 
 def _table(collection: str) -> str:
-    """A collection name as a safe table identifier."""
-    return "kw_" + re.sub(r"\W+", "_", collection)
+    """A collection name as a safe table identifier, one table per name.
+
+    Replacing every run of non-word characters is safe but many-to-one:
+    `second-brain` and `second_brain` both produced `kw_second_brain`, so two
+    corpora shared one table, keyword search for either could return the
+    other's chunks, and `reset` for one dropped the other's index. Collection
+    names are configuration, and a hyphen is conventional in Qdrant and Chroma.
+
+    A name the substitution leaves untouched keeps the table it already has,
+    which is every collection in use. Any other name carries a digest of the
+    real name, under a prefix an untouched name cannot produce.
+    """
+    safe = re.sub(r"\W+", "_", collection)
+    if safe == collection:
+        return "kw_" + safe
+    return f"kwx_{safe}_{hashlib.sha256(collection.encode('utf-8')).hexdigest()[:8]}"
 
 
 def default_index_path() -> Path:
