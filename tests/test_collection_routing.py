@@ -2,54 +2,47 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
+from secondbrain.fakes import FakeStoreFactory
+
 
 def test_ask_routes_to_named_collection(monkeypatch):
     import secondbrain.ask as ask_module
 
-    captured = {}
+    make_store = FakeStoreFactory()
 
-    class FakeStore:
-        def __init__(self, *args, **kwargs):
-            captured["collection"] = kwargs.get("collection")
-
-        def count(self):
-            return 0
-
-    monkeypatch.setattr(ask_module, "Store", FakeStore)
+    monkeypatch.setattr(ask_module, "Store", make_store)
 
     out = ask_module.ask("what is stored?", collection="second_brain_public")
+    captured = {"collection": make_store.collections[-1]}
 
     assert captured["collection"] == "second_brain_public"
     assert out["sources"] == []
 
 
-def test_recall_routes_to_named_collection(monkeypatch):
+def test_recall_routes_to_named_collection(monkeypatch, tmp_path):
     import secondbrain.ask as ask_module
+    from secondbrain import hybrid
+    from secondbrain.keyword_index import KeywordIndex
 
-    captured = {}
+    make_store = FakeStoreFactory(
+        count=1,
+        hits=[
+            {
+                "document": "chunk text",
+                "metadata": {"source": "source.md"},
+                "distance": 0.12345,
+            }
+        ],
+    )
 
-    class FakeStore:
-        def __init__(self, *args, **kwargs):
-            captured["collection"] = kwargs.get("collection")
-
-        def count(self):
-            return 1
-
-        def query(self, qvec, limit):
-            captured["qvec"] = qvec
-            captured["limit"] = limit
-            return [
-                {
-                    "document": "chunk text",
-                    "metadata": {"source": "source.md"},
-                    "distance": 0.12345,
-                }
-            ]
-
-    monkeypatch.setattr(ask_module, "Store", FakeStore)
+    monkeypatch.setattr(ask_module, "Store", make_store)
     monkeypatch.setattr(ask_module, "embed", lambda texts: [[0.5, 0.6]])
+    monkeypatch.setattr(hybrid, "_index", KeywordIndex(tmp_path / "keyword-index.sqlite3"))
 
     out = ask_module.recall("query", top_k=3, collection="second_brain_neutral")
+    store = make_store.stores["second_brain_neutral"]
+    _, qvec, limit = [call for call in store.calls if call[0] == "query"][-1]
+    captured = {"collection": make_store.collections[-1], "qvec": qvec, "limit": limit}
 
     assert captured == {"collection": "second_brain_neutral", "qvec": [0.5, 0.6], "limit": 3}
     assert out == {
@@ -61,25 +54,18 @@ def test_recall_routes_to_named_collection(monkeypatch):
 def test_ingest_paths_routes_to_named_collection(tmp_path, monkeypatch):
     from secondbrain import ingest
 
-    captured = {}
+    make_store = FakeStoreFactory()
 
-    class FakeStore:
-        def __init__(self, *args, **kwargs):
-            captured["collection"] = kwargs.get("collection")
-
-        def delete_source(self, source):
-            captured["deleted"] = source
-
-        def upsert(self, ids, embeddings, documents, metadatas):
-            captured["upserted"] = len(ids)
-
-    monkeypatch.setattr(ingest, "Store", FakeStore)
+    monkeypatch.setattr(ingest, "Store", make_store)
     monkeypatch.setattr(ingest, "embed", lambda texts: [[0.0] for _ in texts])
 
     note = tmp_path / "note.md"
     note.write_text("hello world\n" * 40)
 
     out = list(ingest.ingest_paths(note, collection="second_brain_public"))
+    store = make_store.stores["second_brain_public"]
+    _, ids, *_ = [call for call in store.calls if call[0] == "upsert"][-1]
+    captured = {"collection": make_store.collections[-1], "deleted": store.deleted[-1], "upserted": len(ids)}
 
     assert captured["collection"] == "second_brain_public"
     assert captured["deleted"] == str(note)

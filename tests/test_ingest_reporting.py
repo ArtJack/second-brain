@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 
+from secondbrain.fakes import FakeStore
 from secondbrain.ingest import discover, ingest_paths, last_report, read_file
 
 
@@ -94,19 +95,7 @@ def test_a_zero_chunk_file_is_reported_and_the_run_continues(tmp_path, monkeypat
     (tmp_path / "empty.md").write_text("   \n\n  ")
     (tmp_path / "real.md").write_text("Something worth remembering.")
 
-    class FakeStore:
-        collection_name = "t"
-
-        def reset(self):
-            pass
-
-        def delete_source(self, source):
-            pass
-
-        def upsert(self, **kw):
-            pass
-
-    monkeypatch.setattr(ingest_module, "Store", lambda **kw: FakeStore())
+    monkeypatch.setattr(ingest_module, "Store", lambda **kw: FakeStore("t"))
     monkeypatch.setattr(ingest_module, "embed", lambda chunks: [[0.1, 0.2]] * len(chunks))
     monkeypatch.setattr(ingest_module._index, "upsert_chunks", lambda *a, **k: None)
     monkeypatch.setattr(ingest_module._index, "delete_source", lambda *a, **k: None)
@@ -125,19 +114,7 @@ def test_an_undecodable_file_does_not_stop_the_run(tmp_path, monkeypatch):
     (tmp_path / "broken.md").write_bytes(b"\xff\xfe\x00\xd8\x00\x00\x41")
     (tmp_path / "real.md").write_text("Something worth remembering.")
 
-    class FakeStore:
-        collection_name = "t"
-
-        def reset(self):
-            pass
-
-        def delete_source(self, source):
-            pass
-
-        def upsert(self, **kw):
-            pass
-
-    monkeypatch.setattr(ingest_module, "Store", lambda **kw: FakeStore())
+    monkeypatch.setattr(ingest_module, "Store", lambda **kw: FakeStore("t"))
     monkeypatch.setattr(ingest_module, "embed", lambda chunks: [[0.1, 0.2]] * len(chunks))
     monkeypatch.setattr(ingest_module._index, "upsert_chunks", lambda *a, **k: None)
     monkeypatch.setattr(ingest_module._index, "delete_source", lambda *a, **k: None)

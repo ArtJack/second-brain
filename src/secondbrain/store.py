@@ -9,10 +9,58 @@ from __future__ import annotations
 import uuid
 import warnings
 from pathlib import Path
+from typing import Any, Protocol
 
 import chromadb
 
 from .config import cfg
+
+
+class VectorStore(Protocol):
+    """What the callers of a store use, and all they may use.
+
+    A hit is a dict with `document`, `metadata` and `distance`. ChromaStore and
+    QdrantStore both satisfy it, and `Store()` returns one of them.
+    """
+
+    @property
+    def collection_name(self) -> str: ...
+
+    def upsert(
+        self,
+        ids: list[str],
+        embeddings: list[list[float]],
+        documents: list[str],
+        metadatas: list[dict[str, Any]],
+    ) -> None:
+        """Write chunks; an id that is already stored is replaced, not duplicated."""
+        ...
+
+    def delete_source(self, source: str) -> None:
+        """Drop every chunk whose metadata `source` equals `source`."""
+        ...
+
+    def query(self, embedding: list[float], k: int) -> list[dict[str, Any]]:
+        """The stored chunks nearest `embedding`, at most `k` of them."""
+        ...
+
+    def documents(self) -> list[dict[str, Any]]:
+        """Every stored chunk, each with distance 1.0."""
+        ...
+
+    def get_source_chunk(self, source: str, chunk: int) -> dict[str, Any] | None:
+        """The chunk numbered `chunk` of `source`, with distance 1.0, or None."""
+        ...
+
+    def sources(self) -> dict[str, int]:
+        """Every distinct metadata `source`, with its chunk count."""
+        ...
+
+    def count(self) -> int: ...
+
+    def reset(self) -> None:
+        """Empty the collection this store was opened on."""
+        ...
 
 
 class ChromaStore:
@@ -305,7 +353,7 @@ class QdrantStore:
             self._client.delete_collection(self._collection)
 
 
-def Store(persist_dir: Path | None = None, collection: str | None = None):
+def Store(persist_dir: Path | None = None, collection: str | None = None) -> VectorStore:
     if cfg.store_backend == "chroma":
         return ChromaStore(persist_dir=persist_dir, collection=collection)
     if cfg.store_backend == "qdrant":
