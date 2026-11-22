@@ -11,6 +11,7 @@ import io
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from dotenv import dotenv_values, find_dotenv, load_dotenv
@@ -31,7 +32,22 @@ def _load(path: str) -> tuple[dict[str, str], str | None]:
     return from_file, (_digest(text) if text is not None else None)
 
 
-_ENV_FILE = find_dotenv()
+def _dotenv_disabled() -> bool:
+    """python-dotenv's own off switch, read as python-dotenv (1.2+) reads it.
+
+    `load_dotenv()` honours it. `find_dotenv()` and `dotenv_values()`, which the
+    reading here is built on, do not, so this asks for them. tests/conftest.py
+    sets the switch so that the suite opens no .env at all.
+    """
+    return os.environ.get("PYTHON_DOTENV_DISABLED", "").casefold() in {"1", "true", "t", "yes", "y"}
+
+
+def _env_file(find: Callable[[], str] = find_dotenv) -> str:
+    """The .env this process reads at import and re-reads in refresh(), or "" for none."""
+    return "" if _dotenv_disabled() else find()
+
+
+_ENV_FILE = _env_file()
 _from_file, _stamp = _load(_ENV_FILE)
 
 _ROOT = Path(__file__).resolve().parents[2]

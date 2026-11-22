@@ -173,3 +173,48 @@ def test_a_tool_call_reads_a_changed_env_before_the_tool_runs(env_file):
     status = json.loads(blocks[0].text)
     assert status["backend"] == "http://127.0.0.1:9/v2"
     assert status["chat_model"] == "chat-after"
+
+
+class TestTheSuiteStillReadsNoEnvFile:
+    """`conftest.py` sets python-dotenv's off switch so that the suite opens no .env.
+
+    `load_dotenv()` honours that switch; `find_dotenv()` and `dotenv_values()`,
+    which the re-read is built on, do not. Without asking the switch itself,
+    `config` found the owner's real .env at import, read it to take its digest,
+    and read it again on every tool call: a change to that file in the middle of
+    a run would have put its values into the test process.
+    """
+
+    def test_the_off_switch_decides_whether_config_looks_for_a_file(self, tmp_path, monkeypatch):
+        found = str(tmp_path / ".env")
+
+        monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+        assert config._env_file(lambda: found) == ""
+
+        monkeypatch.delenv("PYTHON_DOTENV_DISABLED")
+        assert config._env_file(lambda: found) == found
+
+    def test_this_process_named_no_env_file_at_import_so_refresh_reads_nothing(self):
+        # Where a real .env sits above this checkout, this is the canary; in CI,
+        # which has none, the test above is. Compared as booleans, as in
+        # test_env_pins.py: a failed comparison would print the path.
+        named_none = config._ENV_FILE == ""
+        assert named_none, "config found a .env to re-read although PYTHON_DOTENV_DISABLED is set"
+        assert refresh() is False
+
+    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "t", "yes", "Y", "0", "false", "no", "on", "", " 1"])
+    def test_config_reads_the_switch_exactly_as_python_dotenv_does(self, value, tmp_path, monkeypatch):
+        """The switch is python-dotenv's, so its reading of a value is the answer."""
+        import dotenv
+
+        canary = tmp_path / ".env"
+        canary.write_text("SB_DOTENV_CANARY=loaded\n", encoding="utf-8")
+        monkeypatch.delenv("SB_DOTENV_CANARY", raising=False)
+        monkeypatch.setenv("PYTHON_DOTENV_DISABLED", value)
+        try:
+            dotenv.load_dotenv(canary)
+            library_read_nothing = "SB_DOTENV_CANARY" not in os.environ
+        finally:
+            os.environ.pop("SB_DOTENV_CANARY", None)
+
+        assert config._dotenv_disabled() is library_read_nothing
