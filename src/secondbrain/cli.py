@@ -743,6 +743,10 @@ def health(
         raise typer.Exit(1) from exc
     console.print(Panel(res["markdown"], title="health", border_style="green" if res["failed"] == 0 else "yellow"))
     console.print(f"[dim]saved: {res['path']}[/]")
+    if res["failed"]:
+        # The panel colour was the only sign, and nothing that runs this command
+        # reads colours: the nightly saw exit 0 whatever failed.
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
