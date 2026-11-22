@@ -6,12 +6,49 @@ the rest of the code doesn't change, because both speak the OpenAI API.
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import os
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, find_dotenv, load_dotenv
 
-load_dotenv()
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _load(path: str) -> tuple[dict[str, str], str | None]:
+    """`load_dotenv()` at import, returning what it put into os.environ and a digest
+    of the file, so that refresh() can later change exactly that and nothing the
+    process inherited."""
+    text = Path(path).read_text(encoding="utf-8") if path else None
+    inherited = set(os.environ)
+    load_dotenv(stream=io.StringIO(text or ""))
+    from_file = {key: os.environ[key] for key in os.environ.keys() - inherited}
+    return from_file, (_digest(text) if text is not None else None)
+
+
+def _dotenv_disabled() -> bool:
+    """python-dotenv's own off switch, read as python-dotenv (1.2+) reads it.
+
+    `load_dotenv()` honours it. `find_dotenv()` and `dotenv_values()`, which the
+    reading here is built on, do not, so this asks for them. tests/conftest.py
+    sets the switch so that the suite opens no .env at all.
+    """
+    return os.environ.get("PYTHON_DOTENV_DISABLED", "").casefold() in {"1", "true", "t", "yes", "y"}
+
+
+def _env_file(find: Callable[[], str] = find_dotenv) -> str:
+    """The .env this process reads at import and re-reads in refresh(), or "" for none."""
+    return "" if _dotenv_disabled() else find()
+
+
+_ENV_FILE = _env_file()
+_from_file, _stamp = _load(_ENV_FILE)
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -79,6 +116,52 @@ class Config:
 
 
 cfg = Config()
+
+# A file modified this recently may still be mid-write: `sops -d … > .env`
+# truncates it first, and a half-written file would point a running server at
+# the defaults. A later call reads it.
+_SETTLE_S = 1.0
+_lock = threading.Lock()
+
+
+def refresh() -> bool:
+    """Re-read .env if it changed since this process read it; True when cfg was updated.
+
+    A process reads .env once, at import, and the MCP server lives as long as the
+    session that started it. On 2026-10-16 fourteen open sessions were still
+    sending a gateway key rotated three days before, or answering from a store
+    that had moved. The rules are load_dotenv()'s: a variable the process
+    inherited keeps winning over the file, and only what the file put into
+    os.environ is updated, or removed when the file drops it. A missing or
+    unreadable file keeps the current settings.
+    """
+    global _stamp
+    if not _ENV_FILE:
+        return False
+    with _lock:
+        try:
+            # Read before stat: the mtime checked is then never older than the text.
+            text = Path(_ENV_FILE).read_text(encoding="utf-8")
+            modified = os.stat(_ENV_FILE).st_mtime
+        except OSError:
+            return False
+        digest = _digest(text)
+        if digest == _stamp or time.time() - modified < _SETTLE_S:
+            return False
+        values = {k: v for k, v in dotenv_values(stream=io.StringIO(text)).items() if v is not None}
+        for key, value in list(_from_file.items()):
+            if os.environ.get(key) != value:
+                del _from_file[key]  # the process set it since: no longer the file's
+            elif key not in values:
+                del os.environ[key]
+                del _from_file[key]
+        for key, value in values.items():
+            if key in _from_file or key not in os.environ:
+                os.environ[key] = value
+                _from_file[key] = value
+        cfg.__dict__.update(Config().__dict__)
+        _stamp = digest
+        return True
 
 
 def collections_for(corpus: str | None) -> list[str]:
