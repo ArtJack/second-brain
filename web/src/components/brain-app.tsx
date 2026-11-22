@@ -35,9 +35,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { OwnerPanel } from "@/components/owner-panel";
 import fallbackJson from "@/data/demo-fallback.json";
-import type { BrainAnswer, BrainSource, BrainStatus, ChatMessage, Corpus, FallbackData, PublicCorpus } from "@/types/brain";
+import type { Grounding, BrainAnswer, BrainSource, BrainStatus, ChatMessage, Corpus, FallbackData, PublicCorpus } from "@/types/brain";
 import { TurnstileField } from "@/components/turnstile-field";
 import { withBase } from "@/lib/base-path";
+import { isUnsupported } from "@/lib/grounding";
 
 const fallback = fallbackJson as FallbackData;
 
@@ -121,6 +122,7 @@ function initialMessages(corpus: Corpus): ChatMessage[] {
       model: answer.model,
       sources: answer.sources,
       invalidCitations: answer.invalid_citations,
+      unsupported: isUnsupported(answer.grounding),
       offline: true,
     },
   ];
@@ -259,6 +261,7 @@ export function BrainApp({ ownerLoginEnabled = false }: { ownerLoginEnabled?: bo
           model: fallbackAnswer.model,
           sources: fallbackAnswer.sources,
           invalidCitations: fallbackAnswer.invalid_citations,
+          unsupported: isUnsupported(fallbackAnswer.grounding),
           streaming: false,
           offline: true,
         }),
@@ -361,10 +364,14 @@ export function BrainApp({ ownerLoginEnabled = false }: { ownerLoginEnabled?: bo
               );
             }
             if (parsed.event === "done") {
-              const doneData = JSON.parse(parsed.data) as { invalid_citations?: number[] };
+              const doneData = JSON.parse(parsed.data) as {
+                invalid_citations?: number[];
+                grounding?: Grounding;
+              };
               setMessages((current) =>
                 updateMessage(current, assistantId, {
                   invalidCitations: doneData.invalid_citations ?? [],
+                  unsupported: isUnsupported(doneData.grounding),
                   streaming: false,
                   latencyMs: Math.round(performance.now() - started),
                   model: status?.chat_model ?? "local model",
@@ -925,6 +932,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             <span className="inline-flex items-center gap-1 text-[var(--accent)]">
               <Loader2 className="size-3.5 animate-spin" />
               Streaming
+            </span>
+          )}
+          {message.unsupported && (
+            <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-[var(--amber-soft)] px-2 py-1 font-medium text-[var(--amber)]">
+              <AlertTriangle className="size-3.5" />
+              Not grounded in these sources
             </span>
           )}
           {message.offline && <span className="text-[var(--amber)]">fallback answer</span>}

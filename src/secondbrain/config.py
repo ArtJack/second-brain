@@ -53,6 +53,22 @@ _from_file, _stamp = _load(_ENV_FILE)
 _ROOT = Path(__file__).resolve().parents[2]
 
 
+def _env_path(name: str, default: Path) -> Path:
+    """A path setting from the environment, with a relative value anchored to this checkout.
+
+    `.env` writes storage paths as `./data/...`. Taken as given, they followed the
+    working directory, so a process started in another folder opened an empty task
+    database and keyword index there, and said nothing. `_ROOT` is the package's
+    own checkout, so a worktree keeps its own `data/`. An absolute value is used as
+    given: that is how worktree code is pointed at production state.
+    """
+    value = os.getenv(name)
+    if not value:
+        return default
+    path = Path(value)
+    return path if path.is_absolute() else _ROOT / path
+
+
 class Config:
     def __init__(self) -> None:
         self.base_url: str = os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:11434/v1")
@@ -61,9 +77,9 @@ class Config:
         self.chat_model: str = os.getenv("CHAT_MODEL", "llama3.1:8b")
         self.vision_model: str = os.getenv("VISION_MODEL", "vision")
         self.store_backend: str = os.getenv("SB_STORE", "chroma").lower()
-        self.persist_dir: Path = Path(os.getenv("SB_DATA") or (_ROOT / "data" / "chroma"))
-        self.memory_dir: Path = Path(os.getenv("SB_MEMORY_DIR") or (_ROOT / "data" / "memory"))
-        self.state_db: Path = Path(os.getenv("SB_STATE_DB") or (_ROOT / "data" / "artjeck.sqlite3"))
+        self.persist_dir: Path = _env_path("SB_DATA", _ROOT / "data" / "chroma")
+        self.memory_dir: Path = _env_path("SB_MEMORY_DIR", _ROOT / "data" / "memory")
+        self.state_db: Path = _env_path("SB_STATE_DB", _ROOT / "data" / "artjeck.sqlite3")
         self.collection: str = os.getenv("SB_COLLECTION", "second_brain")
         # Reference material — study texts, standards, other people's documentation —
         # kept apart from the owner's own notes. Mixed into one collection it wins on
@@ -89,7 +105,7 @@ class Config:
         self.ingest_roots: list[str] = (
             [r for r in roots.split(os.pathsep) if r.strip()]
             if roots.strip()
-            else [str(_ROOT), str(Path(os.getenv("SB_MEMORY_DIR") or (_ROOT / "data" / "memory")))]
+            else [str(_ROOT), str(self.memory_dir)]
         )
         self.hybrid_enabled: bool = os.getenv("SB_HYBRID", "1").strip().lower() not in {
             "0",

@@ -48,7 +48,7 @@ def test_a_slow_tool_does_not_block_another(monkeypatch):
             "answer": "eventually",
             "sources": [],
             "invalid_citations": [],
-            "grounding": {"citations_present": False, "sources_retrieved": 0},
+            "grounding": {"citations_present": False, "sources_retrieved": 0, "unsupported": False},
         }
 
     monkeypatch.setattr(mcp_server, "ask_fn", slow_ask)

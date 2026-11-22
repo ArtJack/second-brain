@@ -169,7 +169,7 @@ def test_collect_project_context_completes_quickly_on_temp_tree(tmp_path, monkey
     assert elapsed < 5  # bounded; a healthy temp-tree run is near-instant
     names = {context.name for context in contexts}
     assert {f"proj{i}" for i in range(6)} <= names
-    assert any("finish proj0" in item for context in contexts for item in context.follow_ups)
+    assert any("finish proj0" in item for context in contexts for item in context.checklist)
 
 
 def test_collect_project_context_is_bounded_when_filesystem_stalls(tmp_path, monkeypatch):

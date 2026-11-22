@@ -33,7 +33,7 @@ def test_a_refusal_is_recognised_as_one():
 
 def test_a_citation_free_claim_is_the_alarm():
     """Evidence was retrieved, none was used, and nothing says it was refused."""
-    answer = "Your preferred invoice format is PDF with line items."
+    answer = "Your preferred fixture-token is beta."
 
     result = grounding(answer, n_sources=3)
 
@@ -42,7 +42,7 @@ def test_a_citation_free_claim_is_the_alarm():
 
 
 def test_a_cited_answer_is_neither():
-    answer = "You prefer PDF invoices with line items [1]."
+    answer = "Your preferred fixture-token is beta [1]."
 
     result = grounding(answer, n_sources=3)
 
