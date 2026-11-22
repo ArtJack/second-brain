@@ -25,6 +25,10 @@ HTTP env:
 Run:
     uv run sb-mcp                                  # stdio
     SB_MCP_TRANSPORT=http SB_MCP_TOKEN=… uv run sb-mcp
+
+Every tool call first re-reads .env if it changed (config.refresh), so a
+rotated key or a moved gateway or store reaches a server that has run for days.
+The transport settings above apply when the server starts.
 """
 from __future__ import annotations
 
@@ -37,6 +41,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -44,7 +49,7 @@ from mcp.types import ToolAnnotations
 
 from .ask import ask as ask_fn
 from .ask import recall as recall_fn
-from .config import cfg, collections_for
+from .config import cfg, collections_for, refresh
 from .ingest import ingest_paths
 from .keyword_index import KeywordIndex
 from .memory import learn as learn_memory
@@ -76,7 +81,16 @@ def _transport_security() -> TransportSecuritySettings:
     return TransportSecuritySettings(allowed_hosts=allowed_hosts, allowed_origins=allowed_origins)
 
 
-mcp = FastMCP(
+class _Server(FastMCP):
+    """FastMCP whose every tool call starts on the current .env (config.refresh)."""
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        if refresh():
+            log.info("Settings re-read from .env before %s", name)
+        return await super().call_tool(name, arguments)
+
+
+mcp = _Server(
     "second-brain",
     instructions=(
         "Your second brain: a personal RAG assistant over the user's own notes, "
@@ -120,6 +134,10 @@ async def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
     Retrieves the most relevant stored chunks and has the local model answer using
     ONLY that context, returning the answer plus the sources it cited.
 
+    When `unsupported` comes back true, the answer cited none of the evidence it
+    was given and did not refuse. Do not repeat it as a fact from the owner's
+    notes; say that it is unsupported, or ask again.
+
     Args:
         question: The natural-language question to answer.
         top_k: How many chunks to retrieve (0 = use the configured default).
@@ -153,6 +171,11 @@ async def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
         # `is False` misses entirely. Better to raise where the bug is.
         "citations_present": result["grounding"]["citations_present"],
         "sources_retrieved": result["grounding"]["sources_retrieved"],
+        # The verdict those two only imply: evidence was retrieved, the answer
+        # cited none of it, and it did not declare that the notes do not cover
+        # the question. Indexed like the others, so a missing key raises here
+        # rather than publishing a null a caller reads as "no alarm".
+        "unsupported": result["grounding"]["unsupported"],
     }
 
 

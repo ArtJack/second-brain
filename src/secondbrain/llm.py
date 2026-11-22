@@ -34,7 +34,26 @@ def _grounded_messages(question: str, context: str) -> list[dict]:
         {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
     ]
 
-_client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key, timeout=cfg.llm_timeout_s, max_retries=1)
+
+def _gateway() -> tuple[str, str, float]:
+    return cfg.base_url, cfg.api_key, cfg.llm_timeout_s
+
+
+def _new_client(base_url: str, api_key: str, timeout: float) -> OpenAI:
+    return OpenAI(base_url=base_url, api_key=api_key, timeout=timeout, max_retries=1)
+
+
+_client_for = _gateway()
+_client = _new_client(*_client_for)
+
+
+def _openai() -> OpenAI:
+    """The client for the gateway cfg names now; config.refresh() can change it."""
+    global _client, _client_for
+    gateway = _gateway()
+    if gateway != _client_for:
+        _client, _client_for = _new_client(*gateway), gateway
+    return _client
 
 
 def embed(texts: list[str]) -> list[list[float]]:
@@ -49,19 +68,19 @@ def embed(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
     try:
-        resp = _client.embeddings.create(model=cfg.embed_model, input=texts)
+        resp = _openai().embeddings.create(model=cfg.embed_model, input=texts)
         return [d.embedding for d in resp.data]
     except BadRequestError:
         out: list[list[float]] = []
         for t in texts:
-            resp = _client.embeddings.create(model=cfg.embed_model, input=t)
+            resp = _openai().embeddings.create(model=cfg.embed_model, input=t)
             out.append(resp.data[0].embedding)
         return out
 
 
 def answer(question: str, context: str) -> str:
     """Generate an answer grounded ONLY in the supplied context, with [n] citations."""
-    resp = _client.chat.completions.create(
+    resp = _openai().chat.completions.create(
         model=cfg.chat_model,
         messages=_grounded_messages(question, context),
         temperature=0.1,
@@ -71,7 +90,7 @@ def answer(question: str, context: str) -> str:
 
 def answer_stream(question: str, context: str) -> Iterator[str]:
     """Stream an answer grounded ONLY in the supplied context, yielding text deltas."""
-    stream = _client.chat.completions.create(
+    stream = _openai().chat.completions.create(
         model=cfg.chat_model,
         messages=_grounded_messages(question, context),
         temperature=0.1,
@@ -97,7 +116,7 @@ def see(image: str | Path, question: str = "Describe this image in detail.") -> 
         mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
         data = base64.b64encode(path.read_bytes()).decode()
         url = f"data:{mime};base64,{data}"
-    resp = _client.chat.completions.create(
+    resp = _openai().chat.completions.create(
         model=cfg.vision_model,
         messages=[
             {
