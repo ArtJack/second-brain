@@ -56,6 +56,9 @@ DEFAULT_CONFIG = {
         "evals/hard.json",
         "evals/regression.json",
         "evals/retrieval.json",
+        # The eval log is a record of the brain's own test questions, not a note:
+        # each entry repeats the words of the query it measured.
+        "docs/eval-results.md",
         ".pytest_cache",
         ".vercel",
         "dist",

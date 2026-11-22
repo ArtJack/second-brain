@@ -10,7 +10,7 @@ cp .env.example .env
 artjeck                    # start talking to Artjeck directly
 sb ingest ~/Notes            # or any file/folder (md, txt, pdf, code…)
 sb ask "what did I decide about the gateway routing?"
-sb learn "My preferred invoice format is PDF with line items."
+sb learn "The example-app staging server is staging.example.com."
 sb agent                    # ask questions, teach it with /learn <fact>
 sb chat                      # interactive
 sb overnight                 # safe nightly scan: ingest changed files + write a morning report
@@ -148,8 +148,8 @@ artjeck
 Teach a fact directly:
 
 ```bash
-sb learn "ArtJack prefers short implementation summaries with exact file paths."
-sb ask "How does ArtJack prefer implementation summaries?"
+sb learn "The example-app staging server is staging.example.com."
+sb ask "Where is the example-app staging server?"
 ```
 
 Use agent mode:

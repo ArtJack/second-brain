@@ -48,7 +48,16 @@ SKIP_PATHS = ("evals/corpus", "evals/corpus-hard")
 # beside a verbatim copy of the question it answers. Anchored like everything
 # else here, because `hard.json` is a generic enough name to belong to someone
 # else's project.
-SKIP_FILES = ("evals/hard.json", "evals/regression.json", "evals/retrieval.json")
+SKIP_FILES = (
+    "evals/hard.json",
+    "evals/regression.json",
+    "evals/retrieval.json",
+    # The eval log records what the brain was asked during testing, so an entry
+    # carries the probe query's own words. Ingested, it becomes a strong keyword
+    # match for the question it measured and competes with the notes that answer
+    # it, which cost two branches a rewrite on 2026-09-12.
+    "docs/eval-results.md",
+)
 
 # Encodings tried in order before a file is declared undecodable. `errors="ignore"`
 # is not on this list and must not come back: it does not fall back, it deletes the
