@@ -112,6 +112,10 @@ async def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
     Retrieves the most relevant stored chunks and has the local model answer using
     ONLY that context, returning the answer plus the sources it cited.
 
+    When `unsupported` comes back true, the answer cited none of the evidence it
+    was given and did not refuse. Do not repeat it as a fact from the owner's
+    notes; say that it is unsupported, or ask again.
+
     Args:
         question: The natural-language question to answer.
         top_k: How many chunks to retrieve (0 = use the configured default).
@@ -145,6 +149,11 @@ async def ask(question: str, top_k: int = 0, corpus: str = "personal") -> dict:
         # `is False` misses entirely. Better to raise where the bug is.
         "citations_present": result["grounding"]["citations_present"],
         "sources_retrieved": result["grounding"]["sources_retrieved"],
+        # The verdict those two only imply: evidence was retrieved, the answer
+        # cited none of it, and it did not declare that the notes do not cover
+        # the question. Indexed like the others, so a missing key raises here
+        # rather than publishing a null a caller reads as "no alarm".
+        "unsupported": result["grounding"]["unsupported"],
     }
 
 
