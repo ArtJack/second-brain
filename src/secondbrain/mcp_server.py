@@ -16,7 +16,11 @@ Two transports, selected by env:
 HTTP env:
     SB_MCP_HOST   bind address (default 127.0.0.1; use the Tailscale IP to share)
     SB_MCP_PORT   port (default 8848)
-    SB_MCP_TOKEN  if set, clients must send `Authorization: Bearer <token>`
+    SB_MCP_TOKEN  required: clients must send `Authorization: Bearer <token>`.
+                  Without it the HTTP transport refuses to start.
+    SB_MCP_ALLOW_NO_TOKEN=1
+                  serve without a token, for local development. Honoured only
+                  when SB_MCP_HOST is a loopback address.
 
 Run:
     uv run sb-mcp                                  # stdio
@@ -25,9 +29,13 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import hmac
+import ipaddress
 import logging
 import os
 import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -41,7 +49,7 @@ from .ingest import ingest_paths
 from .keyword_index import KeywordIndex
 from .memory import learn as learn_memory
 from .store import Store
-from .tasks import TaskStore
+from .tasks import MAX_PAGE, STATUSES, TaskStore
 
 # stdout is the protocol channel for stdio transport — never log there.
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -239,14 +247,35 @@ async def forget(memory_file: str) -> dict:
 
 
 @mcp.tool(annotations=_READONLY)
-async def list_tasks(status: str = "open") -> dict:
-    """List tasks tracked in the second brain.
+async def list_tasks(status: str = "open", limit: int = 50, offset: int = 0) -> dict:
+    """List tasks tracked in the second brain, newest first, one page at a time.
+
+    `total` is how many tasks have this status; `showing` is how many this page
+    holds. When `offset + showing` is less than `total`, older tasks exist: call
+    again with `offset` set to `offset + showing`. `count` is the old name for
+    `showing`, not a total.
 
     Args:
         status: Which tasks to return — "open" (default), "done", or "all".
+        limit: Page size, 1 to 200 (default 50).
+        offset: How many of the newest matching tasks to skip (default 0).
     """
-    tasks = await asyncio.to_thread(lambda: TaskStore().list(status=status))
+    if status not in STATUSES:
+        raise ValueError(f"status must be one of {', '.join(STATUSES)}, not {status!r}")
+    if not 1 <= limit <= MAX_PAGE:
+        raise ValueError(f"limit must be between 1 and {MAX_PAGE}, not {limit}")
+    if offset < 0:
+        raise ValueError(f"offset cannot be negative, not {offset}")
+
+    def _read() -> tuple[int, list[dict]]:
+        store = TaskStore()
+        return store.count(status), store.list(status=status, limit=limit, offset=offset)
+
+    total, tasks = await asyncio.to_thread(_read)
     return {
+        "total": total,
+        "showing": len(tasks),
+        "offset": offset,
         "count": len(tasks),
         "tasks": [
             {"id": t["id"], "title": t["title"], "status": t["status"], "created_at": t["created_at"]}
@@ -306,50 +335,112 @@ class _BearerAuthASGI:
     """Pure-ASGI bearer-token gate.
 
     Implemented at the ASGI layer (not Starlette's BaseHTTPMiddleware) so it does
-    not buffer the Streamable-HTTP response stream.
+    not buffer the Streamable-HTTP response stream. Every HTTP request and every
+    websocket handshake needs the token; only the lifespan events pass without
+    one. The comparison is constant-time, as the web API's is.
     """
 
     def __init__(self, app, token: str):
+        if not token.strip():
+            raise ValueError("the bearer gate needs a non-empty token")
         self.app = app
-        self._expected = f"Bearer {token}"
+        self._expected = f"Bearer {token}".encode()
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            headers = dict(scope.get("headers") or [])
-            if headers.get(b"authorization", b"").decode() != self._expected:
-                await send(
-                    {
-                        "type": "http.response.start",
-                        "status": 401,
-                        "headers": [(b"content-type", b"application/json")],
-                    }
-                )
-                await send({"type": "http.response.body", "body": b'{"error":"unauthorized"}'})
+        if scope["type"] != "lifespan" and not self._authorized(scope):
+            if scope["type"] == "websocket":
+                # Closing before accepting refuses the handshake.
+                await send({"type": "websocket.close", "code": 1008})
                 return
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b'{"error":"unauthorized"}'})
+            return
         await self.app(scope, receive, send)
 
+    def _authorized(self, scope) -> bool:
+        presented = dict(scope.get("headers") or []).get(b"authorization", b"")
+        return hmac.compare_digest(presented, self._expected)
 
-def _run_http() -> None:
+
+class MCPTokenRequired(RuntimeError):
+    """The HTTP transport was asked to serve without a token where it may not."""
+
+
+@dataclass(frozen=True)
+class HttpPlan:
+    """Where the HTTP transport serves, and behind which token."""
+
+    host: str
+    port: int
+    token: str | None  # None only on a loopback host with SB_MCP_ALLOW_NO_TOKEN set
+
+
+def _is_loopback(host: str) -> bool:
+    name = host.strip().strip("[]")
+    if name.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False  # any other name can resolve to any address
+
+
+def http_plan(env: Mapping[str, str]) -> HttpPlan:
+    """Decide whether the HTTP transport may serve, and how. Fails closed.
+
+    Whoever reaches the port reaches every tool, `forget` and `ingest`
+    included. A missing token used to log one warning and serve anyway, so a
+    renamed line in `.env` would have opened all of them to the tailnet.
+    """
+    host = env.get("SB_MCP_HOST", "127.0.0.1")
+    port = int(env.get("SB_MCP_PORT", "8848"))
+    token = env.get("SB_MCP_TOKEN") or ""
+    if token.strip():
+        return HttpPlan(host, port, token)
+    if env.get("SB_MCP_ALLOW_NO_TOKEN", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise MCPTokenRequired(
+            f"SB_MCP_TOKEN is not set, so the HTTP transport will not start on {host}:{port}: "
+            "every tool would be open to whoever can reach it. Set SB_MCP_TOKEN, or, for a "
+            "development server on a loopback address, SB_MCP_ALLOW_NO_TOKEN=1."
+        )
+    if not _is_loopback(host):
+        raise MCPTokenRequired(
+            f"SB_MCP_ALLOW_NO_TOKEN applies to a loopback address only, and {host!r} is not one. "
+            "Set SB_MCP_TOKEN to serve there."
+        )
+    return HttpPlan(host, port, None)
+
+
+def _serve_http(plan: HttpPlan) -> None:
     import uvicorn
 
-    host = os.getenv("SB_MCP_HOST", "127.0.0.1")
-    port = int(os.getenv("SB_MCP_PORT", "8848"))
-    token = os.getenv("SB_MCP_TOKEN")
-
     app = mcp.streamable_http_app()
-    if token:
-        app = _BearerAuthASGI(app, token)
+    if plan.token is not None:
+        app = _BearerAuthASGI(app, plan.token)
         log.info("HTTP transport: bearer-token auth ENABLED")
     else:
-        log.warning("HTTP transport: NO token set (SB_MCP_TOKEN) — endpoint is open on %s:%s", host, port)
-    log.info("Serving second-brain MCP at http://%s:%s/mcp", host, port)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+        log.warning(
+            "HTTP transport: NO token, allowed by SB_MCP_ALLOW_NO_TOKEN on loopback %s:%s", plan.host, plan.port
+        )
+    log.info("Serving second-brain MCP at http://%s:%s/mcp", plan.host, plan.port)
+    uvicorn.run(app, host=plan.host, port=plan.port, log_level="info")
 
 
 def main() -> None:
     transport = os.getenv("SB_MCP_TRANSPORT", "stdio").strip().lower()
     if transport in {"http", "streamable-http", "streamable_http"}:
-        _run_http()
+        try:
+            plan = http_plan(os.environ)
+        except MCPTokenRequired as exc:
+            log.error("%s", exc)
+            raise SystemExit(2) from exc
+        _serve_http(plan)
     else:
         log.info("Serving second-brain MCP over stdio")
         mcp.run()
